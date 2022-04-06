@@ -19,7 +19,7 @@ bert = AutoModel.from_pretrained(bert_name, state_dict=state_dict)
 
 
 model = MyModel(bert)
-model.load_state_dict(torch.load("../model/model_best.pt"))
+# model.load_state_dict(torch.load("../model/model_best.pt"))
 model = model.cuda()
 
 path_train = '../data/train/train_fine.txt.00'
@@ -35,14 +35,20 @@ trainload = DataLoader(trainsetunion, batch_size=128, shuffle=True, collate_fn=t
 testload = DataLoader(testset, batch_size=128, sampler=testsample, collate_fn=testset.collate_fn)
 
 bert_parameters = list(model.bert.parameters())
-other_parameters = []
+other_no_decay_parameters = []
+other_decay_parameters = []
 for name, param in model.named_parameters():
     if 'bert' not in name and param.requires_grad:
-        other_parameters.append(param)
+        if 'bias' not in name:
+            other_no_decay_parameters.append(param)
+        else:
+            other_decay_parameters.append(param)
 
-p = [{'params': bert_parameters, 'lr': 3e-5}, {'params': other_parameters, 'lr': 1e-4}]   
+p = [{'params': bert_parameters, 'lr': 3e-5}, {'params': other_no_decay_parameters, 'lr': 1e-3, 'weight_decay': 0.001}, 
+     {'params': other_decay_parameters, 'lr': 1e-3}]   
 optimizer = torch.optim.Adam(p)
-lrscheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.8)
+#lrscheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.9)
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.6, patience=2)
 
 best_p = 0.0
 for epoch in range(20):
@@ -67,6 +73,6 @@ for epoch in range(20):
                 p = best_p
                 torch.save(model.state_dict(), f'../model/model_best.pt')
                 
-    lrscheduler.step()
+            scheduler.step(p)
                 
 
