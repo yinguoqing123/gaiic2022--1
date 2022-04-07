@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import imp
 from os import truncate
 import torch
@@ -6,8 +7,15 @@ from torch.utils.data import Dataset, DataLoader
 from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence
 import json
+import numpy as np
 
 # 松紧、拉链、系带 会有重复, 但是分属不同的品类: 裤门襟(裤子)  闭合方式(鞋子)
+
+# 各个key attr的 precision: [0.80526919 0.96488294 0.68948247 0.88888889 0.96153846 0.99212598
+#  0.81927711 0.81092437 0.99636364 0.85148515 0.95486111 0.91693291]
+# 总的attr precision: 0.8684450524395805
+# 加权precision: 0.7157225262197902
+# 各个key attr标签数: [873. 598. 599. 738.  26. 254.  83. 238. 275. 101. 288. 313.]
 
 tasks = ['领型', '袖长', '衣长', '版型', '裙长', '穿着方式', '类别', '裤型', '裤长', '裤门襟', 
         '闭合方式', '鞋帮高度']
@@ -44,20 +52,23 @@ class MyDataSet(Dataset):
     def __init__(self, path, tokenizer=None) -> None:
         self.tokenizer = tokenizer
         self.label_nums = [14, 4, 3, 2, 3, 2, 4, 7, 4, 3, 6, 2]
-        self.imgs, self.texts, self.label_match, self.label_attr , self.tasks_mask = self.read(path)
+        self.imgs, self.texts, self.label_match, self.label_attr , self.tasks_mask, self.task_names = self.read(path)
         # label_attr: sample_number, 12
         # tasks_mask: sample_number, 12
     
     def read(self, path):
-        images, texts, label_match, label_attr, tasks_mask = [], [], [], [], []  # label_atrr:  samples*num_tasks
+        images, texts, label_match, label_attr, tasks_mask, task_names = [], [], [], [], [], []  # label_atrr:  samples*num_tasks
         with open(path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
             for line in lines:
                 line = json.loads(line.strip())
+                attrs = line['key_attr']  # coarse 中存在key_attr为空的  1029个 属性不匹配  10000个图文不匹配
+                if not attrs:
+                    continue
                 images.append(line['feature'])
                 texts.append(line['title'])
                 label_match.append(line['match'].get('图文', 0))
-                attrs = line['key_attr']
+                task_names.append(attrs)
                 tasks_mask_ = [0] * 12
                 label_attr_ = [0] * 12
                 for key in attrs:
@@ -66,7 +77,7 @@ class MyDataSet(Dataset):
                     
                 label_attr.append(label_attr_)
                 tasks_mask.append(tasks_mask_)
-        return images, texts, label_match, label_attr, tasks_mask
+        return images, texts, label_match, label_attr, tasks_mask, task_names
                     
                 
     def __len__(self):
@@ -75,7 +86,21 @@ class MyDataSet(Dataset):
     def __getitem__(self, idx):
         text_encode = self.tokenizer(self.texts[idx], padding=True, truncation=True, max_length=32, return_attention_mask=True)
         text_ids, text_mask = text_encode['input_ids'], text_encode['attention_mask']
-        return torch.tensor(self.imgs[idx]), torch.tensor(text_ids), torch.tensor(text_mask), torch.tensor(self.label_attr[idx]), torch.tensor(self.tasks_mask[idx])
+        # generate negative text
+        neg_title = self.texts[idx]
+        select_task = np.random.choice(list(self.task_names[idx].keys()))
+    
+        while True:
+            select_attr_val = np.random.choice(list(valsMap[tasksMap[select_task]].keys()))
+            if valsMap[tasksMap[select_task]][select_attr_val] != valsMap[tasksMap[select_task]][self.task_names[idx][select_task]]:
+                neg_title = neg_title.replace(self.task_names[idx][select_task], select_attr_val)
+                break
+        
+        neg_text_encode =  self.tokenizer(neg_title, padding=True, truncation=True, max_length=32, return_attention_mask=True)
+        neg_text_ids, neg_text_mask = neg_text_encode['input_ids'], neg_text_encode['attention_mask']     
+        
+        return torch.tensor(self.imgs[idx]), torch.tensor(text_ids), torch.tensor(text_mask), torch.tensor(self.label_attr[idx]), torch.tensor(self.tasks_mask[idx]), \
+                torch.tensor(neg_text_ids), torch.tensor(neg_text_mask)
     
     @classmethod
     def collate_fn(cls, x):
@@ -84,7 +109,9 @@ class MyDataSet(Dataset):
         text_mask = pad_sequence([sample[2] for sample in x], batch_first=True)
         label_attr = torch.stack([sample[3] for sample in x], dim=0)
         tasks_mask = torch.stack([sample[4] for sample in x], dim=0)
-        return imgs, text_ids, text_mask, label_attr, tasks_mask
+        neg_text_ids = pad_sequence([sample[5] for sample in x], batch_first=True)
+        neg_text_mask = pad_sequence([sample[6] for sample in x], batch_first=True)
+        return imgs, text_ids, text_mask, label_attr, tasks_mask, neg_text_ids, neg_text_mask
     
     
 class TestDataSet(Dataset):

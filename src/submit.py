@@ -71,7 +71,7 @@ for input in dataloader:
     input = input[:-2]
     input = [f.cuda() for f in input]
     imgtextscore, attrscore = model.getSubmit(input)  # attrscore: bsz, num_task
-    imgtextscore = np.where(imgtextscore>0.4, 1, 0)
+    #imgtextscore = np.where(imgtextscore>0.4, 1, 0)
     match_label.extend(imgtextscore)
     for i in range(len(attrscore)):
         task_nm = tasks_array[mask[i]==1]
@@ -86,7 +86,7 @@ with open("../data/submit.json", "w", encoding='utf-8') as f:
     for i in range(len(img_name)):
         d = {'img_name': img_name[i]}
         attr = {}
-        attr['图文'] = 1 if int(match_label[i]) > 0.65 else 0
+        attr['图文'] = 1 if int(match_label[i]) > 0.75 else 0
         for query, val in attr_match[i]:
             attr[query] = int(val)
         d['match'] = attr
