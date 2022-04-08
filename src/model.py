@@ -52,6 +52,28 @@ class MMoE(nn.Module):
             final.append(prob)
             
         return final  #  num_tasks, batch_size , (task_category_num)  (列表)
+    
+class AttentionPooling1D(nn.Module):
+    """通过加性Attention, 将向量序列融合为一个定长向量
+    """
+    def __init__(self, in_features,  **kwargs):
+        super(AttentionPooling1D, self).__init__(**kwargs)
+        self.in_features = in_features # 词向量维度
+        self.k_dense = nn.Linear(self.in_features, self.in_features, bias=False)
+    def forward(self, xo, query, mask):
+        x = self.k_dense(xo)  # x: bsz, seq_len, dim
+        query = query.unsqueeze(dim=0).permute(0, 2, 1)  # 1, bsz, dim => 1, dim, bsz
+        out = torch.matmul(x, query).permute(0, 2, 1)  #bsz, seq, bsz => bsz, bsz, seq
+        mask = mask.unsqueeze(dim=1)   #  bsz, 1,  seq_len 
+        out = out - (1-mask.float()) * 1e12  # bsz, bsz, seq_len
+        out = F.softmax(out, dim=-1) 
+        out = x.unsqueeze(dim=1) * out.unsqueeze(dim=-1) # bsz, bsz, seq, dim
+        out = torch.sum(out, dim=-2)  # bsz, bsz, dim
+        return out
+        # x = torch.sum(x * query.unsqueeze(dim=1), dim=-1)
+        # x = x - (1 - mask.float()) * 1e12
+        # x = F.softmax(x, dim=-1)  # bsz, seq_len
+        #return torch.sum(x.unsqueeze(dim=-1) * xo, dim=-2) #bsz, bsz, dim
 
     
 class ClassifyLoss(nn.Module):
@@ -73,17 +95,17 @@ class MyModel(nn.Module):
     def __init__(self, bert, experts=12, num_tasks=12, dims=2048) -> None:
         super().__init__()
         self.bert = bert
-        self.dense1 = nn.Linear(dims, 768, bias=False)  # 图像特征降维
+        self.dense1 = nn.Linear(dims, 768)  # 图像特征降维
         # self.dense2 = nn.Linear(1024, 768, bias=False)  # 图像特征变换用于匹配文本特征
-        self.mmoe = MMoE(experts, num_tasks)
-        # self.dense2 = nn.Sequential(nn.Linear(768*2, 512), nn.LeakyReLU())
-        self.imgtextmatch = nn.Sequential(nn.Linear(768*2, 512), nn.LeakyReLU(), nn.Linear(512, 128), 
-                                          nn.LeakyReLU(), nn.Linear(128, 1))
+        # self.mmoe = MMoE(experts, num_tasks)
+        self.dense2 = nn.Sequential(nn.Linear(768*2, 512), nn.LeakyReLU())
+        self.imgtextmatch = nn.Sequential(nn.Linear(512, 128), nn.LeakyReLU(), 
+                                          nn.Linear(128, 1))
         # self.imgtextmatch = nn.Linear(512, 1)
-        # self.attmatch = nn.Sequential(nn.Linear(512, 128), nn.LeakyReLU(), 
-        #                                   nn.Linear(128, 12))
-        self.attrloss = ClassifyLoss()
-        self.loss = nn.BCEWithLogitsLoss()
+        self.attmatch = nn.Sequential(nn.Linear(512, 128), nn.LeakyReLU(), 
+                                          nn.Linear(128, 12))
+        # self.attrloss = ClassifyLoss()
+        self.loss = nn.BCEWithLogitsLoss(reduction='sum')
         # weight = torch.tensor([2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2], dtype=torch.float, device='cuda')
         # self.loss = nn.MultiLabelSoftMarginLoss(reduction='sum', weight=weight)
 
@@ -95,16 +117,32 @@ class MyModel(nn.Module):
         text_neg = self.bert(neg_text_ids, neg_text_mask)[0][:, 0, :]
                 
         img = self.dense1(img)
-        
-        imgtextloss = self.imgTextLoss(img, text_pos, text_neg)
-        
-        attr_out = self.mmoe(img) 
 
-        attr_loss = self.attrLoss(attr_out, label_attr, mask)
-        
-        loss = imgtextloss + attr_loss
+        pos_sample = torch.cat([text_pos, img], dim=-1)
+        neg_sample = torch.cat([text_neg, img], dim=-1)
+
+        pos_sample = self.dense2(pos_sample)
+        neg_sample = self.dense2(neg_sample)
                 
-        return imgtextloss 
+        pos_img_text_match = self.imgtextmatch(pos_sample)
+        neg_img_text_match = self.imgtextmatch(neg_sample)
+                
+        pos_attr_match = self.attmatch(pos_sample) # bsz, 12
+        pos_attr_match = pos_attr_match[(mask==1)&(neg_tasks_mask==0)].unsqueeze(dim=-1) # bsz, 1
+        neg_att_match = self.attmatch(neg_sample)
+        
+        neg_att_match[mask==0] = -1e12
+        
+        label_pos = torch.ones_like(pos_attr_match) # bsz, 1        
+        label = torch.cat([torch.ones(img.shape[0], 1, device='cuda'), torch.zeros(img.shape[0], 1, device='cuda'),
+                            neg_tasks_mask.float(), label_pos], dim=-1)
+        
+                
+        pred = torch.cat([pos_img_text_match, neg_img_text_match, neg_att_match, pos_attr_match], dim=-1)
+        loss = self.loss(pred, label)
+        
+                
+        return loss 
     
     def getAttrScore(self, img):
         attr_out = self.mmoe(img)
@@ -136,11 +174,11 @@ class MyModel(nn.Module):
             pred_labels.append(out)
         return pred_labels
     
-    def imgTextLoss(self, img, text_pos, text_neg):
+    def imgTextLoss(self, img, text_pos, text_neg, all_attr_match):
         # 对比损失
-        # img = F.normalize(img, dim=-1)
-        # text_pos = F.normalize(text_pos, dim=-1)
-        # text_neg = F.normalize(text_neg, dim=-1)
+        img = F.normalize(img, dim=-1)
+        text_pos = F.normalize(text_pos, dim=-1)
+        text_neg = F.normalize(text_neg, dim=-1)
         # scores = torch.matmul(img, text.t())
         # all_attr_match = torch.diag_embed(all_attr_match) + torch.ones_like(scores, device='cuda')
         # scores = scores * all_attr_match
@@ -149,24 +187,12 @@ class MyModel(nn.Module):
         # mask = (scores_trans < -0.2).float() * -1e12
         # scores_trans = scores_trans*20 + mask 
         # loss = torch.logsumexp(scores_trans, dim=1).mean() + torch.logsumexp(scores_trans, dim=0).mean()
-        # pos_score = torch.sum(img * text_pos, dim=-1, keepdim=True)
-        # neg_score = torch.sum(img * text_neg, dim=-1, keepdim=True)
-        # scores_trans = torch.cat([pos_score, neg_score], dim=-1) - pos_score
-        # #scores_trans = scores_trans * 5
-        # loss = torch.logsumexp(scores_trans, dim=1).mean()
-        pos = torch.cat([img, text_pos], dim=-1)
-        neg = torch.cat([img, text_neg], dim=-1)
-        pos_score = self.imgtextmatch(pos)
-        neg_score = self.imgtextmatch(neg)
-        pos_label = torch.ones_like(pos_score)
-        neg_label = torch.zeros_like(neg_score)
-        loss = self.loss(pos_score, pos_label) + self.loss(neg_score, neg_label)
+        pos_score = torch.sum(img * text_pos, dim=-1, keepdim=True)
+        neg_score = torch.sum(img * text_neg, dim=-1, keepdim=True)
+        scores_trans = torch.cat([pos_score, neg_score], dim=-1) - pos_score
+        #scores_trans = scores_trans * 5
+        loss = torch.logsumexp(scores_trans, dim=1).mean()
         return loss
-    
-    def getImgTextScore(self, img, text):
-        feat = torch.cat([img, text], dim=-1)
-        score = torch.sigmoid(self.imgtextmatch(feat))
-        return score
     
     def attrLoss(self, attr_out, label_attr, mask):
         loss = self.attrloss(attr_out, label_attr, mask)  # list:   num_tasks 
@@ -180,22 +206,44 @@ class MyModel(nn.Module):
         img, text_ids, text_mask, label_attr, mask, neg_text_ids, neg_text_mask, neg_tasks_mask = input
 
         mask = mask.float()
-        img = self.dense1(img)
         text_pos = self.bert(text_ids, text_mask)[0][:, 0, :]  
         text_neg = self.bert(neg_text_ids, neg_text_mask)[0][:, 0, :]
 
-        neg_img_text_match = self.getImgTextScore(img, text_pos)
-        pos_img_text_match = self.getImgTextScore(img, text_neg)
+        img = self.dense1(img)
+
+        pos_sample = torch.cat([text_pos, img], dim=-1)
+        neg_sample = torch.cat([text_neg, img], dim=-1)
+
+        pos_sample = self.dense2(pos_sample)
+        neg_sample = self.dense2(neg_sample)
+
+        neg_img_text_match = F.sigmoid(self.imgtextmatch(neg_sample))
+        pos_img_text_match = F.sigmoid(self.imgtextmatch(pos_sample))
+
+        # pos_attr_match = F.sigmoid(self.attmatch(pos_sample))
+        # tp_attr_pos = torch.where(pos_attr_match>0.5, torch.ones_like(pos_attr_match), torch.zeros_like(pos_attr_match))
+
+        # att_match = F.sigmoid(self.attmatch(neg_sample))
+        att_match = F.sigmoid(self.attmatch(pos_sample))
+
+        # att_match[(mask==1)&(neg_tasks_mask==0)] = pos_attr_match[(mask==1)&(neg_tasks_mask==0)]
+        att_match = torch.where(att_match>0.5, torch.ones_like(att_match, dtype=torch.int64), torch.zeros_like(att_match, dtype=torch.int64))
+
+        # att_label = neg_tasks_mask.long()
+        att_label = mask.long()
+        tp_attr = torch.sum((att_match == att_label).float() * mask, dim=0)
+
+        tp_attr = tp_attr.tolist()
+
+        pos_num = torch.sum(mask, dim=0).tolist()
         
         acc_match = (torch.sum(pos_img_text_match>0.5).cpu().item() + torch.sum(neg_img_text_match<0.5).cpu().item())/2
 
-        attr_out = self.mmoe(img)  # num_tasks, batch_size , task_category_num (列表)
-        tp_attr, pos_num = [], []
-        for i in range(len(attr_out)):
-            pred = attr_out[i].argmax(dim=-1)  # batch_size
-            tp_attr.append(torch.sum((pred == label_attr[:, i]).float()  * mask[:, i]).item())
-            pos_num.append(torch.sum(mask[:, i]).item())
+        neg_att_match = F.sigmoid(self.attmatch(neg_sample))
+        neg_att_match = neg_att_match[(mask==1)&(neg_tasks_mask==0)]  #batch_size
+        
+        neg_attr_tp = torch.sum(neg_att_match<0.5).item()
             
-        return acc_match , tp_attr, pos_num   # tp_attr pos_num  : 各任务的true positive 和 sum positive
+        return acc_match , tp_attr, pos_num, neg_attr_tp    # tp_attr pos_num  : 各任务的true positive 和 sum positive
     
 
