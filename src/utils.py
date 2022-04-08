@@ -5,12 +5,14 @@ import numpy as np
 def evaluate(dataset, model):
     model.eval()
     acc_match, attr_tp, attr_posnum = 0, [], []
+    neg_attr_tp = 0
     for input in dataset:
         input = [f.cuda() for f in input]
-        acc_match_batch , attr_tp_batch, attr_posnum_batch = model.getMetric(input) 
+        acc_match_batch , attr_tp_batch, attr_posnum_batch, neg_attr_tp_ = model.getMetric(input) 
         acc_match += acc_match_batch
         attr_tp.append(attr_tp_batch)
         attr_posnum.append(attr_posnum_batch)
+        neg_attr_tp += neg_attr_tp_
         
     attr_tp, attr_posnum = np.array(attr_tp), np.array(attr_posnum)
     attr_tp_cate = np.sum(attr_tp, axis=0)
@@ -26,5 +28,6 @@ def evaluate(dataset, model):
     print(f"总的attr precision: {all_attr_precision}")
     print(f"加权precision: {precision}")
     print(f"各个key attr标签数: {attr_posnum_cate}")
+    print(f"负样本中attr tp num: {neg_attr_tp}, acc: {neg_attr_tp/2000}")
     print("============================================")
     return precision

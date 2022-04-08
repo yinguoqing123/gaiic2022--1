@@ -31,7 +31,7 @@ trainsetunion = ConcatDataset([trainset, traincoarseset])
 testset = MyDataSet(path_test, tokenizer=tokenizer)
 testsample = SequentialSampler(testset)
 
-trainload = DataLoader(trainsetunion, batch_size=128, shuffle=True, collate_fn=trainset.collate_fn)
+trainload = DataLoader(trainset, batch_size=128, shuffle=True, collate_fn=trainset.collate_fn)
 testload = DataLoader(testset, batch_size=128, sampler=testsample, collate_fn=testset.collate_fn)
 
 bert_parameters = list(model.bert.parameters())
