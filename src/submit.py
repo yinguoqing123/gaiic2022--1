@@ -76,7 +76,7 @@ for input in dataloader:
     for i in range(len(attrscore)):
         task_nm = tasks_array[mask[i]==1]
         task_val = attrscore[i][mask[i]==1]
-        flag = (label_attr[i][mask[i]==1] == task_val).astype(int)
+        flag = [1 if val>0.5 else 0 for val in task_val]
         tmp = list(zip(task_nm, flag))
         attr_match.append(tmp)
         
@@ -86,11 +86,10 @@ with open("../data/submit.json", "w", encoding='utf-8') as f:
     for i in range(len(img_name)):
         d = {'img_name': img_name[i]}
         attr = {}
-        attr['图文'] = 1 if int(match_label[i]) > 0.75 else 0
+        attr['图文'] =  0
         for query, val in attr_match[i]:
             attr[query] = int(val)
         d['match'] = attr
         d = json.dumps(d, ensure_ascii=False)
         f.write(d+'\n')
         
-    

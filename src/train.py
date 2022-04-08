@@ -19,7 +19,7 @@ bert = AutoModel.from_pretrained(bert_name, state_dict=state_dict)
 
 
 model = MyModel(bert)
-# model.load_state_dict(torch.load("../model/model_best.pt"))
+model.load_state_dict(torch.load("../model/model_best.pt"))
 model = model.cuda()
 
 path_train = '../data/train/train_fine.txt.00'
@@ -76,3 +76,8 @@ for epoch in range(20):
             scheduler.step(p)
                 
 
+a = []
+for i in range(len(testset)):
+    a.append(testset[i][4].numpy())
+    
+a = np.array(a)
