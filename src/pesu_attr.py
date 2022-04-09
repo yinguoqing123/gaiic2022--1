@@ -32,8 +32,8 @@ valsMap = [{'高领': 0, '半高领': 0, '立领': 0, '连帽': 1, '可脱卸帽
            {'松紧带': 0, '拉链': 1, '套筒': 2, '套脚': 2, '一脚蹬': 2, '系带': 3, '魔术贴': 4, '搭扣': 5}, 
            {'高帮': 0, '中帮': 0, '低帮': 1}]
 
-fw = open("../data/train_coarse_trans.txt", 'w', encoding='utf-8')
-with open("../data/train_coarse.txt") as f:
+fw = open("../data/train/train_coarse_trans.txt", 'w', encoding='utf-8')
+with open("../data/train/train_coarse.txt") as f:
     lines = f.readlines()
     for line in lines[:10]:
         line = json.loads(line.strip())
@@ -60,9 +60,7 @@ with open("../data/train_coarse.txt") as f:
                         match[tasks[i]] = 1
                         
         if match['图文'] == 1:
-            fw.wriet(json.dumps(line, ensure_ascii=False))
+            fw.write(json.dumps(line, ensure_ascii=False)+'\n')
             
 fw.close()
                 
-        
-        

@@ -88,10 +88,8 @@ class MyDataSet(Dataset):
         text_encode = self.tokenizer(self.texts[idx], padding=True, truncation=True, max_length=32, return_attention_mask=True)
         text_ids, text_mask = text_encode['input_ids'], text_encode['attention_mask']
         # generate negative text
-        neg_title = self.texts[idx]
+        neg_title = self.texts[idx] 
         select_task = np.random.choice(list(self.task_names[idx].keys()))
-        neg_tasks_mask = copy.deepcopy(self.tasks_mask[idx])
-        neg_tasks_mask[tasksMap[select_task]] = 0
         while True:
             select_attr_val = np.random.choice(list(valsMap[tasksMap[select_task]].keys()))
             if valsMap[tasksMap[select_task]][select_attr_val] != valsMap[tasksMap[select_task]][self.task_names[idx][select_task]]:
@@ -100,10 +98,9 @@ class MyDataSet(Dataset):
         
         neg_text_encode =  self.tokenizer(neg_title, padding=True, truncation=True, max_length=32, return_attention_mask=True)
         neg_text_ids, neg_text_mask = neg_text_encode['input_ids'], neg_text_encode['attention_mask'] 
-            
-        
+             
         return torch.tensor(self.imgs[idx]), torch.tensor(text_ids), torch.tensor(text_mask),  torch.tensor(self.label_attr[idx]), torch.tensor(self.tasks_mask[idx]), \
-                torch.tensor(neg_text_ids), torch.tensor(neg_text_mask), torch.tensor(neg_tasks_mask)
+                torch.tensor(neg_text_ids), torch.tensor(neg_text_mask)
     
     @classmethod
     def collate_fn(cls, x):
@@ -114,8 +111,7 @@ class MyDataSet(Dataset):
         tasks_mask = torch.stack([sample[4] for sample in x], dim=0)
         neg_text_ids = pad_sequence([sample[5] for sample in x], batch_first=True)
         neg_text_mask = pad_sequence([sample[6] for sample in x], batch_first=True)
-        neg_tasks_mask = torch.stack([sample[7] for sample in x], dim=0)
-        return imgs, text_ids, text_mask, label_attr, tasks_mask, neg_text_ids, neg_text_mask, neg_tasks_mask
+        return imgs, text_ids, text_mask, label_attr, tasks_mask, neg_text_ids, neg_text_mask
     
     
 class TestDataSet(Dataset):

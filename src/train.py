@@ -18,8 +18,8 @@ bert = AutoModel.from_pretrained(bert_name, state_dict=state_dict)
 # bert = BertModel.from_pretrained('hfl/chinese-roberta-wwm-ext')
 
 
-model = MyModel(bert)
-model.load_state_dict(torch.load("../model/model_best.pt"))
+model = MyModel(bert=bert, tokenizer=tokenizer, num_tasks=12, dims=2048)
+#model.load_state_dict(torch.load("../model/model_best.pt"))
 model = model.cuda()
 
 path_train = '../data/train/train_fine.txt.00'
@@ -31,7 +31,9 @@ trainsetunion = ConcatDataset([trainset, traincoarseset])
 testset = MyDataSet(path_test, tokenizer=tokenizer)
 testsample = SequentialSampler(testset)
 
-trainload = DataLoader(trainset, batch_size=128, shuffle=True, collate_fn=trainset.collate_fn)
+# trainload = DataLoader(trainsetunion, batch_size=128, shuffle=True, collate_fn=trainset.collate_fn)
+traincoarseload = DataLoader(traincoarseset, batch_size=128, shuffle=True, collate_fn=trainset.collate_fn)
+trainfineload = DataLoader(trainset, batch_size=128, shuffle=True, collate_fn=trainset.collate_fn)
 testload = DataLoader(testset, batch_size=128, sampler=testsample, collate_fn=testset.collate_fn)
 
 bert_parameters = list(model.bert.parameters())
@@ -44,17 +46,17 @@ for name, param in model.named_parameters():
         else:
             other_decay_parameters.append(param)
 
-p = [{'params': bert_parameters, 'lr': 3e-5}, {'params': other_no_decay_parameters, 'lr': 1e-3, 'weight_decay': 0.001}, 
-     {'params': other_decay_parameters, 'lr': 1e-3}]   
+p = [{'params': bert_parameters, 'lr': 3e-5}, {'params': other_no_decay_parameters, 'lr': 5e-4, 'weight_decay': 0.001}, 
+     {'params': other_decay_parameters, 'lr': 5e-4}]   
 optimizer = torch.optim.Adam(p)
 #lrscheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.9)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.6, patience=2)
 
 best_p = 0.0
-for epoch in range(20):
+for epoch in range(5):
     step = 0
     running_loss = 0
-    for input in trainload:
+    for input in traincoarseload:
         model.train()
         step += 1
         input = [f.cuda() for f in input]
@@ -76,8 +78,27 @@ for epoch in range(20):
             scheduler.step(p)
                 
 
-a = []
-for i in range(len(testset)):
-    a.append(testset[i][4].numpy())
-    
-a = np.array(a)
+
+for epoch in range(5):
+    step = 0
+    running_loss = 0
+    for input in trainfineload:
+        model.train()
+        step += 1
+        input = [f.cuda() for f in input]
+        loss = model(input)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        running_loss += loss.item()
+        if step % 100 == 99:
+            print(f"Epoch {epoch+1}, step {step+1} : {running_loss}")
+            running_loss = 0
+        
+        if step % 300 == 299:
+            p = evaluate(testload, model)
+            if p > best_p:
+                p = best_p
+                torch.save(model.state_dict(), f'../model/model_best.pt')
+                
+            scheduler.step(p)
