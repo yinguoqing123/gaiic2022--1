@@ -18,8 +18,8 @@ bert = AutoModel.from_pretrained(bert_name, state_dict=state_dict)
 # bert = BertModel.from_pretrained('hfl/chinese-roberta-wwm-ext')
 
 
-model = MyModel(bert=bert, tokenizer=tokenizer, num_tasks=12, dims=2048)
-#model.load_state_dict(torch.load("../model/model_best.pt"))
+model = MyModel(bert)
+# model.load_state_dict(torch.load("../model/model_best.pt"))
 model = model.cuda()
 
 path_train = '../data/train/train_fine.txt.00'
@@ -27,11 +27,10 @@ path_coarse_train = '../data/train/train_coarse_trans.txt'
 path_test = '../data/train/train_fine.txt.01'
 trainset = MyDataSet(path_train, tokenizer=tokenizer)
 traincoarseset = MyDataSet(path_coarse_train, tokenizer=tokenizer)
-trainsetunion = ConcatDataset([trainset, traincoarseset])
+# trainsetunion = ConcatDataset([trainset, traincoarseset])
 testset = MyDataSet(path_test, tokenizer=tokenizer)
 testsample = SequentialSampler(testset)
 
-# trainload = DataLoader(trainsetunion, batch_size=128, shuffle=True, collate_fn=trainset.collate_fn)
 traincoarseload = DataLoader(traincoarseset, batch_size=128, shuffle=True, collate_fn=trainset.collate_fn)
 trainfineload = DataLoader(trainset, batch_size=128, shuffle=True, collate_fn=trainset.collate_fn)
 testload = DataLoader(testset, batch_size=128, sampler=testsample, collate_fn=testset.collate_fn)
@@ -46,14 +45,14 @@ for name, param in model.named_parameters():
         else:
             other_decay_parameters.append(param)
 
-p = [{'params': bert_parameters, 'lr': 3e-5}, {'params': other_no_decay_parameters, 'lr': 5e-4, 'weight_decay': 0.001}, 
-     {'params': other_decay_parameters, 'lr': 5e-4}]   
+p = [{'params': bert_parameters, 'lr': 3e-5}, {'params': other_no_decay_parameters, 'lr': 1e-3, 'weight_decay': 0.001}, 
+     {'params': other_decay_parameters, 'lr': 1e-3}]   
 optimizer = torch.optim.Adam(p)
 #lrscheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.9)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.6, patience=2)
 
 best_p = 0.0
-for epoch in range(5):
+for epoch in range(10):
     step = 0
     running_loss = 0
     for input in traincoarseload:
@@ -76,10 +75,11 @@ for epoch in range(5):
                 torch.save(model.state_dict(), f'../model/model_best.pt')
                 
             scheduler.step(p)
-                
 
+model.load_state_dict(torch.load("../model/model_best.pt"))         
 
-for epoch in range(5):
+best_p = 0.0
+for epoch in range(10):
     step = 0
     running_loss = 0
     for input in trainfineload:
