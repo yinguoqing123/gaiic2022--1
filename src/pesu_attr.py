@@ -35,7 +35,7 @@ valsMap = [{'高领': 0, '半高领': 0, '立领': 0, '连帽': 1, '可脱卸帽
 fw = open("../data/train/train_coarse_trans.txt", 'w', encoding='utf-8')
 with open("../data/train/train_coarse.txt") as f:
     lines = f.readlines()
-    for line in lines[:10]:
+    for line in lines:
         line = json.loads(line.strip())
         title = line['title']
         key_attr = line['key_attr']

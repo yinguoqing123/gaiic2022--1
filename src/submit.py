@@ -48,7 +48,7 @@ tokenizer = AutoTokenizer.from_pretrained(bert_name)
 bert = AutoModel.from_pretrained(bert_name, state_dict=state_dict)
 
 
-model = MyModel(bert)
+model = MyModel(bert=bert, tokenizer=tokenizer, num_tasks=12, dims=2048)
 model.load_state_dict(torch.load("../model/model_best.pt"))
 model = model.cuda()
 
@@ -56,7 +56,7 @@ path = '../data/preliminary_testA.txt'
 dataset = TestDataSet(path, tokenizer=tokenizer)
 datasample = SequentialSampler(dataset)
 
-dataloader = DataLoader(dataset, batch_size=64, sampler=datasample, collate_fn=dataset.collate_fn)
+dataloader = DataLoader(dataset, batch_size=256, sampler=datasample, collate_fn=dataset.collate_fn)
 
 model.eval()
 match_label, attr_match = [], []
