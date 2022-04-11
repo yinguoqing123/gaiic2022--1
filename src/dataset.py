@@ -1,5 +1,3 @@
-from contextlib import contextmanager
-import imp
 from os import truncate
 import torch
 from torch import nn
@@ -93,8 +91,8 @@ class MyDataSet(Dataset):
         # generate negative text
         neg_title = self.texts[idx]
         select_task = np.random.choice(list(self.task_names[idx].keys()))
-        neg_tasks_mask = [0] * len(self.tasks_mask[idx])
-        neg_tasks_mask[tasksMap[select_task]] = 1
+        neg_tasks_mask = copy.deepcopy(self.tasks_mask[idx])
+        neg_tasks_mask[tasksMap[select_task]] = 0
         while True:
             select_attr_val = np.random.choice(list(valsMap[tasksMap[select_task]].keys()))
             if valsMap[tasksMap[select_task]][select_attr_val] != valsMap[tasksMap[select_task]][self.task_names[idx][select_task]]:
@@ -106,14 +104,17 @@ class MyDataSet(Dataset):
         
         #再随机选取一个attr(select task和上面一致) 正例  其余attr 全部用其他值替换， 最后预测这个正例是否匹配
         pos_attr_title =  self.texts[idx]
-        pos_tasks_mask = [0] * len(neg_tasks_mask)
-        pos_tasks_mask[tasksMap[select_task]] = 1
+        pos_tasks_mask = copy.deepcopy(self.tasks_mask[idx])
         for key in self.task_names[idx].keys():
             if key == select_task:
                 pass
             else:
-                val = np.random.choice(list(valsMap[tasksMap[key]].keys()))  # 随机选取一个替换，可能是正，可能是负，也可以进一步做到必须为负值
-                pos_attr_title = pos_attr_title.replace(self.task_names[idx][key], val)
+                while True:
+                    val = np.random.choice(list(valsMap[tasksMap[key]].keys()))  # 随机选取一个替换，可能是正，可能是负，也可以进一步做到必须为负值
+                    if valsMap[tasksMap[key]][val] != valsMap[tasksMap[key]][self.task_names[idx][key]]:
+                        pos_tasks_mask[tasksMap[key]] = 0
+                        pos_attr_title = pos_attr_title.replace(self.task_names[idx][key], val)
+                        break
         
         pos_attr_text_encode =  self.tokenizer(pos_attr_title, padding=True, truncation=True, max_length=32, return_attention_mask=True)
         pos_attr_text_ids, pos_attr_text_mask = pos_attr_text_encode['input_ids'], pos_attr_text_encode['attention_mask']
