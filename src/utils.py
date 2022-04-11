@@ -41,27 +41,39 @@ valsMap = [{'高领': 0, '半高领': 0, '立领': 0, '连帽': 1, '可脱卸帽
 
 def evaluate(dataset, model):
     model.eval()
-    acc_match, attr_tp, attr_posnum = 0, [], []
+    acc_match, attr_tp, attr_posnum, attr_tp2, neg_attr_tp, pos_attr_tp = 0, [], [], [], 0, 0
     neg_attr_tp = 0
     for input in dataset:
         input = [f.cuda() for f in input]
-        acc_match_batch , attr_tp_batch, attr_posnum_batch = model.getMetric(input) 
+        acc_match_batch , attr_tp_batch, attr_posnum_batch, attr_tp2_batch, neg_attr_tp_batch, pos_attr_tp_batch = model.getMetric(input) 
         acc_match += acc_match_batch
         attr_tp.append(attr_tp_batch)
         attr_posnum.append(attr_posnum_batch)
+        attr_tp2.append(attr_tp2_batch)
+        neg_attr_tp += neg_attr_tp_batch
+        pos_attr_tp += pos_attr_tp_batch
         
     attr_tp, attr_posnum = np.array(attr_tp), np.array(attr_posnum)
     attr_tp_cate = np.sum(attr_tp, axis=0)
     attr_posnum_cate = np.sum(attr_posnum, axis=0)
     all_attr_precision = sum(attr_tp_cate) / sum(attr_posnum_cate)
-    
+    attr_tp2 = np.array(attr_tp2)
+    attr_tp_cate2 = np.sum(attr_tp2, axis=0)
+    all_attr_precision2 = np.sum(attr_tp2) / sum(attr_posnum_cate)
+
+
     acc_match_precision = acc_match/2000
     
-    precision = all_attr_precision*0.5 + acc_match_precision * 0.5
+    # precision = all_attr_precision*0.5 + acc_match_precision * 0.5
+    precision = acc_match_precision * 0.5 + (neg_attr_tp+pos_attr_tp) / 4000 * 0.5
     
     print(f"图文匹配batch内top1 acc: {acc_match_precision}")
     print(f"各个key attr的 precision: {attr_tp_cate/attr_posnum_cate}")
     print(f"总的attr precision: {all_attr_precision}")
+    print(f"辅助任务key attr precision: {attr_tp_cate2/attr_posnum_cate}")
+    print(f"辅助任务总的attr precision: {all_attr_precision2}")
+    print(f"辅助任务中 neg attr precision: {neg_attr_tp}")
+    print(f"辅助任务中 pos attr precision {pos_attr_tp}")
     print(f"加权precision: {precision}")
     print(f"各个key attr标签数: {attr_posnum_cate}")
     print("============================================")

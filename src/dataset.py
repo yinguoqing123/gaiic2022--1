@@ -50,7 +50,8 @@ valsMap = [{'高领': 0, '半高领': 0, '立领': 0, '连帽': 1, '可脱卸帽
 label_nums = [14, 4, 3, 2, 3, 2, 4, 7, 4, 3, 6, 2]
 
 class MyDataSet(Dataset):
-    def __init__(self, path, tokenizer=None) -> None:
+    def __init__(self, path, tokenizer=None, mode='fine') -> None:
+        self.mode = mode
         self.tokenizer = tokenizer
         self.label_nums = [14, 4, 3, 2, 3, 2, 4, 7, 4, 3, 6, 2]
         self.imgs, self.texts, self.label_match, self.label_attr , self.tasks_mask, self.task_names = self.read(path)
@@ -73,6 +74,8 @@ class MyDataSet(Dataset):
                 tasks_mask_ = [0] * 12
                 label_attr_ = [0] * 12
                 for key in attrs:
+                    if self.mode != 'fine' and key == '衣长':
+                        continue
                     tasks_mask_[tasksMap[key]] = 1
                     label_attr_[tasksMap[key]] = valsMap[tasksMap[key]][attrs[key]]
                     
@@ -88,8 +91,10 @@ class MyDataSet(Dataset):
         text_encode = self.tokenizer(self.texts[idx], padding=True, truncation=True, max_length=32, return_attention_mask=True)
         text_ids, text_mask = text_encode['input_ids'], text_encode['attention_mask']
         # generate negative text
-        neg_title = self.texts[idx] 
+        neg_title = self.texts[idx]
         select_task = np.random.choice(list(self.task_names[idx].keys()))
+        neg_tasks_mask = [0] * len(self.tasks_mask[idx])
+        neg_tasks_mask[tasksMap[select_task]] = 1
         while True:
             select_attr_val = np.random.choice(list(valsMap[tasksMap[select_task]].keys()))
             if valsMap[tasksMap[select_task]][select_attr_val] != valsMap[tasksMap[select_task]][self.task_names[idx][select_task]]:
@@ -97,10 +102,25 @@ class MyDataSet(Dataset):
                 break
         
         neg_text_encode =  self.tokenizer(neg_title, padding=True, truncation=True, max_length=32, return_attention_mask=True)
-        neg_text_ids, neg_text_mask = neg_text_encode['input_ids'], neg_text_encode['attention_mask'] 
-             
+        neg_text_ids, neg_text_mask = neg_text_encode['input_ids'], neg_text_encode['attention_mask']
+        
+        #再随机选取一个attr(select task和上面一致) 正例  其余attr 全部用其他值替换， 最后预测这个正例是否匹配
+        pos_attr_title =  self.texts[idx]
+        pos_tasks_mask = [0] * len(neg_tasks_mask)
+        pos_tasks_mask[tasksMap[select_task]] = 1
+        for key in self.task_names[idx].keys():
+            if key == select_task:
+                pass
+            else:
+                val = np.random.choice(list(valsMap[tasksMap[key]].keys()))  # 随机选取一个替换，可能是正，可能是负，也可以进一步做到必须为负值
+                pos_attr_title = pos_attr_title.replace(self.task_names[idx][key], val)
+        
+        pos_attr_text_encode =  self.tokenizer(pos_attr_title, padding=True, truncation=True, max_length=32, return_attention_mask=True)
+        pos_attr_text_ids, pos_attr_text_mask = pos_attr_text_encode['input_ids'], pos_attr_text_encode['attention_mask']
+
         return torch.tensor(self.imgs[idx]), torch.tensor(text_ids), torch.tensor(text_mask),  torch.tensor(self.label_attr[idx]), torch.tensor(self.tasks_mask[idx]), \
-                torch.tensor(neg_text_ids), torch.tensor(neg_text_mask)
+                torch.tensor(neg_text_ids), torch.tensor(neg_text_mask), torch.tensor(neg_tasks_mask), \
+                torch.tensor(pos_attr_text_ids), torch.tensor(pos_attr_text_mask), torch.tensor(pos_tasks_mask)
     
     @classmethod
     def collate_fn(cls, x):
@@ -111,7 +131,12 @@ class MyDataSet(Dataset):
         tasks_mask = torch.stack([sample[4] for sample in x], dim=0)
         neg_text_ids = pad_sequence([sample[5] for sample in x], batch_first=True)
         neg_text_mask = pad_sequence([sample[6] for sample in x], batch_first=True)
-        return imgs, text_ids, text_mask, label_attr, tasks_mask, neg_text_ids, neg_text_mask
+        neg_tasks_mask = torch.stack([sample[7] for sample in x], dim=0)
+        pos_attr_text_ids = pad_sequence([sample[8] for sample in x], batch_first=True)
+        pos_attr_text_mask = pad_sequence([sample[9] for sample in x], batch_first=True)
+        pos_tasks_mask = torch.stack([sample[10] for sample in x], dim=0)
+        return imgs, text_ids, text_mask, label_attr, tasks_mask, neg_text_ids, neg_text_mask, neg_tasks_mask, \
+            pos_attr_text_ids, pos_attr_text_mask, pos_tasks_mask
     
     
 class TestDataSet(Dataset):
