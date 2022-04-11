@@ -103,30 +103,35 @@ class MyModel(nn.Module):
         mask = mask.float()
         text_pos = self.bert(text_ids, text_mask)[0][:, 0, :]  
         text_neg = self.bert(neg_text_ids, neg_text_mask)[0][:, 0, :]
+        text_neg_sg = text_neg.detach()
         text_attr_pos = self.bert(pos_attr_text_ids, pos_attr_text_mask)[0][:, 0, :]
+        text_attr_pos_sg = text_attr_pos.detach()
                 
         img = self.imgprocess(img)
 
         pos_sample = torch.cat([text_pos, img], dim=-1)
         neg_sample = torch.cat([text_neg, img], dim=-1)
+        neg_sample_detach = torch.cat([text_neg_sg, img], dim=-1)
         pos_attr_sample = torch.cat([text_attr_pos, img], dim=-1)
+        pos_attr_detach = torch.cat([text_attr_pos_sg, img], dim=-1)
 
         pos_sample = self.match(pos_sample)   # bsz, 13
         neg_sample = self.match(neg_sample)   # bsz, 13
+        neg_sample_detach = self.match(neg_sample_detach)
         pos_attr_sample = self.match(pos_attr_sample)  # bsz, 13
-        
+        pos_attr_detach = self.match(pos_attr_detach)
+                
         label_imgtext = torch.cat([torch.ones(pos_sample.shape[0],  1, device='cuda'), torch.zeros(pos_sample.shape[0], 2, device='cuda')], dim=-1)  # bsz, 3     
-    
+
         pred_imgtext = torch.stack([pos_sample[:, 0], neg_sample[:, 0], pos_attr_sample[:, 0]], dim=-1)  # bsz, 3 
-        
+
         loss_imgtext = self.loss(pred_imgtext, label_imgtext)
-        
-        neg_sample[:, 1:][mask==0] = 1e-12
-        pos_attr_sample[:, 1:][mask==0] = 1e-12
+                
+        neg_sample_detach[:, 1:][mask==0] = -1e12
+        pos_attr_detach[:, 1:][mask==0] = -1e12
         label_attr = torch.cat([neg_tasks_mask.float(), pos_tasks_mask.float()], dim=-1)
-        pred_attr = torch.cat([neg_sample[:, 1:], pos_attr_sample[:, 1:]], dim=-1)
+        pred_attr = torch.cat([neg_sample_detach[:, 1:], pos_attr_detach[:, 1:]], dim=-1)
         loss_attr = self.loss(pred_attr, label_attr)
-        
         
         # aux_loss = self.imgTextLoss(img, text_pos)
         
@@ -211,7 +216,7 @@ class MyModel(nn.Module):
         pos_sample = torch.cat([text_pos, img], dim=-1)
         neg_sample = torch.cat([text_neg, img], dim=-1)
         pos_attr_sample = torch.cat([text_attr_pos, img], dim=-1)
-        
+
         pos_sample = F.sigmoid(self.match(pos_sample))
         neg_sample = F.sigmoid(self.match(neg_sample))
         pos_attr_sample = F.sigmoid(self.match(pos_attr_sample))
@@ -222,17 +227,17 @@ class MyModel(nn.Module):
 
         acc_match = (torch.sum(pos_img_text_match>0.5).cpu().item() + torch.sum(neg_img_text_match<0.5).cpu().item() + \
             torch.sum(pos_attr_img_text_match<0.5).cpu().item())/3
-        
+
         pos_attr_match = pos_sample[:, 1:]  #bsz, 12
         neg_attr_match = neg_sample[:, 1:]
         pos_attr_attr_match = pos_attr_sample[:, 1:]
 
-        # attr_out = self.mmoe(img)  # num_tasks, batch_size , task_category_num (列表)
-        # tp_attr, pos_num = [], []
-        # for i in range(len(attr_out)):
-        #     pred = attr_out[i].argmax(dim=-1)  # batch_size
-        #     tp_attr.append(torch.sum((pred == label_attr[:, i]).float()  * mask[:, i]).item())
-        #     pos_num.append(torch.sum(mask[:, i]).item())
+                # attr_out = self.mmoe(img)  # num_tasks, batch_size , task_category_num (列表)
+                # tp_attr, pos_num = [], []
+                # for i in range(len(attr_out)):
+                #     pred = attr_out[i].argmax(dim=-1)  # batch_size
+                #     tp_attr.append(torch.sum((pred == label_attr[:, i]).float()  * mask[:, i]).item())
+                #     pos_num.append(torch.sum(mask[:, i]).item())
 
         # 辅助任务
         pos_attr_match = torch.where(pos_attr_match>0.5, torch.ones_like(pos_attr_match, dtype=torch.int64), 
@@ -244,7 +249,7 @@ class MyModel(nn.Module):
                                 torch.zeros_like(neg_attr_match, dtype=torch.int64))
 
         tp_neg_attr = torch.sum((neg_attr_match == neg_tasks_mask.long()).float() * mask, dim=0).tolist()
-        
+
         pos_attr_attr_match = torch.where(pos_attr_attr_match>0.5, torch.ones_like(pos_attr_attr_match, dtype=torch.int64), 
                                 torch.zeros_like(pos_attr_attr_match, dtype=torch.int64))
 
