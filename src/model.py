@@ -12,9 +12,9 @@ class MMoE(nn.Module):
         self.num_tasks = num_tasks
         self.experts = nn.ModuleList([nn.Sequential(nn.Linear(dims, 128), nn.LeakyReLU()) 
                                       for i in range(num_experts)])
-        self.experts_spe = nn.ModuleDict({f'task_{task_index}': nn.ModuleList([nn.Sequential(nn.Linear(dims, 128), nn.LeakyReLU()) for _ in range(self.num_experts_spe)]) for task_index in range(self.num_tasks)})
+        # self.experts_spe = nn.ModuleDict({f'task_{task_index}': nn.ModuleList([nn.Sequential(nn.Linear(dims, 128), nn.LeakyReLU()) for _ in range(self.num_experts_spe)]) for task_index in range(self.num_tasks)})
         # self.gates = nn.ModuleList([nn.Sequential(nn.Linear(dims, 128), nn.ReLU(), nn.Linear(128, self.num_experts+self.num_experts_spe)) for i in range(num_tasks)])
-        self.gates = nn.ModuleList([nn.Sequential(nn.Linear(dims, self.num_experts+self.num_experts_spe, bias=False)) for i in range(num_tasks)])
+        self.gates = nn.ModuleList([nn.Sequential(nn.Linear(dims, self.num_experts, bias=False)) for i in range(num_tasks)])
         self.classify = nn.Linear(128, 1)
         
     def forward(self, input):
@@ -24,15 +24,15 @@ class MMoE(nn.Module):
 
         out_experts = torch.stack(out_experts, dim=0).permute(1, 0, 2) # b, num_experts, 128
         
-        out_experts_spe = []
-        for task_index in range(self.num_tasks):
-            for layer in self.experts_spe[f'task_{task_index}']:
-                out_experts_spe.append(layer(input))   # num_task * num_experts_spe, bsz, dim
+        # out_experts_spe = []
+        # for task_index in range(self.num_tasks):
+        #     for layer in self.experts_spe[f'task_{task_index}']:
+        #         out_experts_spe.append(layer(input))   # num_task * num_experts_spe, bsz, dim
                 
-        out_experts_spe = torch.stack(out_experts_spe, dim=0).reshape(self.num_tasks, self.num_experts_spe, -1, 128).permute(2, 0, 1, 3)  #  bsz, num_task, num_experts_spe, dim
-        bsz, num_task, num_experts_spe, dim = out_experts_spe.size()
+        # out_experts_spe = torch.stack(out_experts_spe, dim=0).reshape(self.num_tasks, self.num_experts_spe, -1, 128).permute(2, 0, 1, 3)  #  bsz, num_task, num_experts_spe, dim
+        # bsz, num_task, num_experts_spe, dim = out_experts_spe.size()
 
-        out_experts = torch.cat([out_experts.unsqueeze(dim=1).expand(-1, num_task, -1, -1), out_experts_spe], dim=2)
+        # out_experts = torch.cat([out_experts.unsqueeze(dim=1).expand(-1, num_task, -1, -1), out_experts_spe], dim=2)
         
         out_gates = []
         for layer in self.gates:
@@ -41,7 +41,7 @@ class MMoE(nn.Module):
         out_gates = torch.stack(out_gates, dim=0).permute(1, 0, 2)  # b, num_tasks, num_experts+num_experts_spe
         out_gates = torch.softmax(out_gates, dim=-1)
 
-        out = out_experts * out_gates.unsqueeze(dim=-1)  # b, num_tasks,  num_experts+num_experts_spe, 128
+        out = out_experts.unsqueeze(dim=1) * out_gates.unsqueeze(dim=-1)  # b, num_tasks,  num_experts+num_experts_spe, 128
         out = torch.sum(out, dim=2)  # b, num_tasks, 128
         
         out = self.classify(out).squeeze() # b, num_tasks
@@ -143,7 +143,7 @@ class MyModel(nn.Module):
         img = self.imgprocess(img)
         text = self.bert(text_ids, text_mask)[0][:, 0, :]
         sample = torch.cat([text, img], dim=-1)
-        sample = F.sigmoid(self.match(sample))
+        sample = F.sigmoid(self.mmoe(self.match(sample)))
         
         img_text_match_score = sample[:, 0].cpu().numpy()
         attrscore = sample[:, 1:].cpu().numpy()

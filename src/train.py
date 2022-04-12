@@ -7,13 +7,14 @@ import numpy as np
 from dataset import MyDataSet
 from model import MyModel
 from utils import evaluate
+from visualbert import DistilBertModel
 
 bert_name = 'M-CLIP/M-BERT-Distil-40'
 bert_name = 'sentence-transformers/clip-ViT-B-32-multilingual-v1'
 
 state_dict = torch.load("../pretrained_model/clip-ViT-B-32-multilingual-v1.bin")
 tokenizer = AutoTokenizer.from_pretrained(bert_name)
-bert = AutoModel.from_pretrained(bert_name, state_dict=state_dict)
+bert = DistilBertModel.from_pretrained(bert_name, state_dict=state_dict)
 # tokenizer = BertTokenizer.from_pretrained('hfl/chinese-roberta-wwm-ext')
 # bert = BertModel.from_pretrained('hfl/chinese-roberta-wwm-ext')
 
