@@ -7,6 +7,7 @@ from torch.nn.utils.rnn import pad_sequence
 import json
 import numpy as np
 import copy
+import random
 
 # 松紧、拉链、系带 会有重复, 但是分属不同的品类: 裤门襟(裤子)  闭合方式(鞋子)
 
@@ -45,6 +46,27 @@ valsMap = [{'高领': 0, '半高领': 0, '立领': 0, '连帽': 1, '可脱卸帽
            {'松紧带': 0, '拉链': 1, '套筒': 2, '套脚': 2, '一脚蹬': 2, '系带': 3, '魔术贴': 4, '搭扣': 5}, 
            {'高帮': 0, '中帮': 0, '低帮': 1}]
 
+replace_val = { '高领': ['半高领', '立领'], '半高领': ['高领', '立领'], '立领': ['半高领', '高领'],
+               '翻领': ['衬衫领', 'POLO领', '方领', '娃娃领', '荷叶领'], 
+               '衬衫领': ['翻领', 'POLO领', '方领', '娃娃领', '荷叶领'], 
+               'POLO领': ['翻领', '衬衫领', '方领', '娃娃领', '荷叶领'], 
+               '方领': ['翻领', '衬衫领', 'POLO领', '娃娃领', '荷叶领'], 
+               '娃娃领': ['翻领', '衬衫领', 'POLO领', '方领', '荷叶领'], 
+               '荷叶领': ['翻领', '衬衫领', 'POLO领', '方领', '娃娃领'],
+               '连帽': ['可脱卸帽'], '可脱卸帽': ['连帽'], 
+               '短袖': ['五分袖'], '五分袖': ['短袖'], '九分袖': ['长袖'], '长袖': ['九分袖'],
+               '超短款': ['短款', '常规款'], '短款': ['超短款', '常规款'], '常规款': ['超短款', '短款'], 
+               '长款': ['超长款'], '超长款': ['长款'],
+               '修身型': ['标准型'], '标准型': ['修身型'], 
+               '短裙': ['超短裙'], '超短裙': ['短裙'], '中裙': ['中长裙'], '中长裙': ['中裙'],
+               'O型裤': ['锥形裤', '哈伦裤', '灯笼裤'], '锥形裤': ['O型裤', '哈伦裤', '灯笼裤'], '哈伦裤': ['O型裤', '锥形裤', '灯笼裤'], '灯笼裤': ['O型裤', '锥形裤', '哈伦裤'],
+               '铅笔裤': ['直筒裤', '小脚裤'], '直筒裤': ['铅笔裤', '小脚裤'], '小脚裤': ['铅笔裤', '直筒裤'],
+               '喇叭裤': ['微喇裤'], '微喇裤': ['喇叭裤'], 
+               '九分裤': ['长裤'], '长裤': ['九分裤'],
+               '套筒': ['套脚', '一脚蹬'], '套脚': ['套筒', '一脚蹬'], '一脚蹬': ['套筒', '套脚'],
+               '高帮': ['中帮'], '中帮': ['高帮']         
+}
+
 label_nums = [14, 4, 3, 2, 3, 2, 4, 7, 4, 3, 6, 2]
 
 class MyDataSet(Dataset):
@@ -72,8 +94,8 @@ class MyDataSet(Dataset):
                 tasks_mask_ = [0] * 12
                 label_attr_ = [0] * 12
                 for key in attrs:
-                    if self.mode != 'fine' and key == '衣长':
-                        continue
+                    # if self.mode != 'fine' and key == '衣长':
+                    #     continue
                     tasks_mask_[tasksMap[key]] = 1
                     label_attr_[tasksMap[key]] = valsMap[tasksMap[key]][attrs[key]]
                     
@@ -86,13 +108,25 @@ class MyDataSet(Dataset):
         return len(self.label_match)
     
     def __getitem__(self, idx):
-        text_encode = self.tokenizer(self.texts[idx], padding=True, truncation=True, max_length=32, return_attention_mask=True)
+        # 正样本增强
+        title = self.texts[idx]
+        # for val in self.task_names[idx].values():
+        #     if val in replace_val and np.random.rand() < 0.3:
+        #         title = title.replace(val, np.random.choice(replace_val[val]))
+        
+        text_encode = self.tokenizer(title, padding=True, truncation=True, max_length=32, return_attention_mask=True)
         text_ids, text_mask = text_encode['input_ids'], text_encode['attention_mask']
-        # generate negative text
-        neg_title = self.texts[idx]
+        # generate negative text： 只用作图文匹配的负样本
+        neg_title = title
         select_task = np.random.choice(list(self.task_names[idx].keys()))
         neg_tasks_mask = copy.deepcopy(self.tasks_mask[idx])
         neg_tasks_mask[tasksMap[select_task]] = 0
+        for key in self.task_names[idx].keys():
+            if key != select_task:
+                if np.random.rand() < 0.2:   # 再取0.2的概率随机替换
+                    val = np.random.choice(list(valsMap[tasksMap[key]].keys()))
+                    neg_title = neg_title.replace(self.task_names[idx][key], val)
+                    
         while True:
             select_attr_val = np.random.choice(list(valsMap[tasksMap[select_task]].keys()))
             if valsMap[tasksMap[select_task]][select_attr_val] != valsMap[tasksMap[select_task]][self.task_names[idx][select_task]]:
@@ -102,15 +136,17 @@ class MyDataSet(Dataset):
         neg_text_encode =  self.tokenizer(neg_title, padding=True, truncation=True, max_length=32, return_attention_mask=True)
         neg_text_ids, neg_text_mask = neg_text_encode['input_ids'], neg_text_encode['attention_mask']
         
-        #再随机选取一个attr(select task和上面一致) 正例  其余attr 全部用其他值替换， 最后预测这个正例是否匹配
+        #  属性上的负样本 
         pos_attr_title =  self.texts[idx]
         pos_tasks_mask = copy.deepcopy(self.tasks_mask[idx])
         for key in self.task_names[idx].keys():
-            if key == select_task:
+            if np.random.rand() > 0.5: 
+                # if self.task_names[idx][key] in replace_val and np.random.rand() < 0.3:
+                #     pos_attr_title = pos_attr_title.replace(self.task_names[idx][key], np.random.choice(replace_val[self.task_names[idx][key]]))
                 pass
             else:
                 while True:
-                    val = np.random.choice(list(valsMap[tasksMap[key]].keys()))  # 随机选取一个替换，可能是正，可能是负，也可以进一步做到必须为负值
+                    val = np.random.choice(list(valsMap[tasksMap[key]].keys()))  # 随机替换
                     if valsMap[tasksMap[key]][val] != valsMap[tasksMap[key]][self.task_names[idx][key]]:
                         pos_tasks_mask[tasksMap[key]] = 0
                         pos_attr_title = pos_attr_title.replace(self.task_names[idx][key], val)

@@ -48,7 +48,7 @@ tokenizer = AutoTokenizer.from_pretrained(bert_name)
 bert = AutoModel.from_pretrained(bert_name, state_dict=state_dict)
 
 
-model = MyModel(bert=bert, tokenizer=tokenizer, num_tasks=12, dims=2048)
+model = MyModel(bert=bert, num_tasks=13, dims=2048)
 model.load_state_dict(torch.load("../model/model_best.pt"))
 model = model.cuda()
 
@@ -76,8 +76,8 @@ for input in dataloader:
     for i in range(len(attrscore)):
         task_nm = tasks_array[mask[i]==1]
         task_val = attrscore[i][mask[i]==1]
-        # flag = [1 if val>0.5 else 0 for val in task_val]
-        flag = (label_attr[i][mask[i]==1] == task_val).astype(int)
+        flag = [1 if val>0.5 else 0 for val in task_val]
+        #flag = (label_attr[i][mask[i]==1] == task_val).astype(int)
         tmp = list(zip(task_nm, flag))
         attr_match.append(tmp)
         

@@ -19,7 +19,7 @@ bert = AutoModel.from_pretrained(bert_name, state_dict=state_dict)
 
 
 model = MyModel(bert)
-model.load_state_dict(torch.load("../model/model_best.pt"))
+# model.load_state_dict(torch.load("../model/model_best.pt"))
 model = model.cuda()
 
 path_train = '../data/train/train_fine.txt.00'
@@ -31,8 +31,8 @@ trainsetunion = ConcatDataset([trainset, traincoarseset])
 testset = MyDataSet(path_test, tokenizer=tokenizer)
 testsample = SequentialSampler(testset)
 
-trainload = DataLoader(trainsetunion, batch_size=128, shuffle=True, collate_fn=trainset.collate_fn)
-testload = DataLoader(testset, batch_size=128, sampler=testsample, collate_fn=testset.collate_fn)
+trainload = DataLoader(trainsetunion, batch_size=128, shuffle=True, collate_fn=trainset.collate_fn, num_workers=8)
+testload = DataLoader(testset, batch_size=128, sampler=testsample, collate_fn=testset.collate_fn, num_workers=8)
 
 bert_parameters = list(model.bert.parameters())
 other_no_decay_parameters = []
