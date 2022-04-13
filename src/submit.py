@@ -7,6 +7,7 @@ import numpy as np
 from dataset import MyDataSet, TestDataSet
 from model import MyModel
 from utils import evaluate
+from visualbert import DistilBertModel
 import json
 
 tasks = ['领型', '袖长', '衣长', '版型', '裙长', '穿着方式', '类别', '裤型', '裤长', '裤门襟', 
@@ -45,7 +46,7 @@ bert_name = 'sentence-transformers/clip-ViT-B-32-multilingual-v1'
 
 state_dict = torch.load("../pretrained_model/clip-ViT-B-32-multilingual-v1.bin")
 tokenizer = AutoTokenizer.from_pretrained(bert_name)
-bert = AutoModel.from_pretrained(bert_name, state_dict=state_dict)
+bert = DistilBertModel.from_pretrained(bert_name, state_dict=state_dict)
 
 
 model = MyModel(bert=bert, num_tasks=13, dims=2048)

@@ -1,27 +1,32 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from transformers import AutoModel, AutoConfig, AutoTokenizer, BertModel, BertTokenizer
+from transformers import AutoModel, AutoConfig, BertModel, AutoTokenizer,  BertTokenizer
 from torch.utils.data import DataLoader, SequentialSampler, ConcatDataset
 import numpy as np
 from dataset import MyDataSet
 from model import MyModel
-from utils import evaluate
+from utils import evaluate, EMA
 from visualbert import DistilBertModel
+from lebert import LeBertModel
 
 bert_name = 'M-CLIP/M-BERT-Distil-40'
 bert_name = 'sentence-transformers/clip-ViT-B-32-multilingual-v1'
+bert_name = 'hfl/chinese-roberta-wwm-ext'
 
 state_dict = torch.load("../pretrained_model/clip-ViT-B-32-multilingual-v1.bin")
 tokenizer = AutoTokenizer.from_pretrained(bert_name)
 bert = DistilBertModel.from_pretrained(bert_name, state_dict=state_dict)
 # tokenizer = BertTokenizer.from_pretrained('hfl/chinese-roberta-wwm-ext')
-# bert = BertModel.from_pretrained('hfl/chinese-roberta-wwm-ext')
+# bert = LeBertModel.from_pretrained('hfl/chinese-roberta-wwm-ext')
 
 
 model = MyModel(bert)
-# model.load_state_dict(torch.load("../model/model_best.pt"))
 model = model.cuda()
+ema = EMA(model)
+# model.load_state_dict(torch.load("../model/model_best.pt"))
+ema.register()
+
 
 path_train = '../data/train/train_fine.txt.00'
 path_coarse_train = '../data/train/train_coarse_trans.txt'
@@ -63,16 +68,24 @@ for epoch in range(10):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        if epoch > 4:
+            ema.update()
         running_loss += loss.item()
         if step % 100 == 99:
             print(f"Epoch {epoch+1}, step {step+1} : {running_loss}")
             running_loss = 0
         
         if step % 300 == 299:
+            if epoch > 4:
+                ema.apply_shadow()
+                
             p = evaluate(testload, model)
             if p > best_p:
                 p = best_p
                 torch.save(model.state_dict(), f'../model/model_best.pt')
+            
+            if epoch > 4:
+                ema.restore()
                 
             scheduler.step(p)
                 

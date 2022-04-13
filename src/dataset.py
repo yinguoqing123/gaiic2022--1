@@ -94,8 +94,8 @@ class MyDataSet(Dataset):
                 tasks_mask_ = [0] * 12
                 label_attr_ = [0] * 12
                 for key in attrs:
-                    # if self.mode != 'fine' and key == '衣长':
-                    #     continue
+                    if self.mode != 'fine':
+                        continue
                     tasks_mask_[tasksMap[key]] = 1
                     label_attr_[tasksMap[key]] = valsMap[tasksMap[key]][attrs[key]]
                     
@@ -123,7 +123,7 @@ class MyDataSet(Dataset):
         neg_tasks_mask[tasksMap[select_task]] = 0
         for key in self.task_names[idx].keys():
             if key != select_task:
-                if np.random.rand() < 0.2:   # 再取0.2的概率随机替换
+                if np.random.rand() < 0.4:   # 再取0.2的概率随机替换
                     val = np.random.choice(list(valsMap[tasksMap[key]].keys()))
                     neg_title = neg_title.replace(self.task_names[idx][key], val)
                     
@@ -137,7 +137,7 @@ class MyDataSet(Dataset):
         neg_text_ids, neg_text_mask = neg_text_encode['input_ids'], neg_text_encode['attention_mask']
         
         #  属性上的负样本 
-        pos_attr_title =  self.texts[idx]
+        pos_attr_title =  title
         pos_tasks_mask = copy.deepcopy(self.tasks_mask[idx])
         for key in self.task_names[idx].keys():
             if np.random.rand() > 0.5: 

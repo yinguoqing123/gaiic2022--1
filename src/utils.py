@@ -47,25 +47,67 @@ def evaluate(dataset, model):
         acc_match_batch, attr_posnum_batch, attr_tp_batch,  = model.getMetric(input) 
         acc_match += acc_match_batch
         attr_tp.append(attr_tp_batch)
-        attr_posnum.append(attr_posnum_batch)
-
-        
+        attr_posnum.append(attr_posnum_batch) 
+            
     attr_tp, attr_posnum = np.array(attr_tp), np.array(attr_posnum)
     attr_tp_cate = np.sum(attr_tp, axis=0)
     attr_posnum_cate = np.sum(attr_posnum, axis=0)
     all_attr_precision = sum(attr_tp_cate) / sum(attr_posnum_cate)
-
-
     acc_match_precision = acc_match/2000
-    
     # precision = all_attr_precision*0.5 + acc_match_precision * 0.5
     precision = acc_match_precision * 0.5 + all_attr_precision * 0.5
-    
     print(f"图文匹配batch内top1 acc: {acc_match_precision}")
     print(f"各个key attr的 precision: {attr_tp_cate/attr_posnum_cate}")
     print(f"总的attr precision: {all_attr_precision}")
-
     print(f"加权precision: {precision}")
     print(f"各个key attr标签数: {attr_posnum_cate}")
     print("============================================")
     return precision
+
+class EMA():
+    def __init__(self, model, decay=0.9):
+        self.model = model
+        self.decay = decay
+        self.shadow = {}
+        self.backup = {}
+
+    def register(self):
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                self.shadow[name] = param.data.clone()
+
+    def update(self):
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                assert name in self.shadow
+                new_average = (1.0 - self.decay) * param.data + self.decay * self.shadow[name]
+                self.shadow[name] = new_average.clone()
+
+    def apply_shadow(self):
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                assert name in self.shadow
+                self.backup[name] = param.data
+                param.data = self.shadow[name]
+
+    def restore(self):
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                assert name in self.backup
+                param.data = self.backup[name]
+        self.backup = {}
+
+# # 初始化
+# ema = EMA(model, 0.999)
+# ema.register()
+
+# # 训练过程中，更新完参数后，同步update shadow weights
+# def train():
+#     optimizer.step()
+#     ema.update()
+
+# # eval前，apply shadow weights；eval之后，恢复原来模型的参数
+# def evaluate():
+#     ema.apply_shadow()
+#     # evaluate
+#     ema.restore()
