@@ -12,28 +12,29 @@ from lebert import LeBertModel
 
 bert_name = 'M-CLIP/M-BERT-Distil-40'
 bert_name = 'sentence-transformers/clip-ViT-B-32-multilingual-v1'
-bert_name = 'hfl/chinese-roberta-wwm-ext'
 
 state_dict = torch.load("../pretrained_model/clip-ViT-B-32-multilingual-v1.bin")
 tokenizer = AutoTokenizer.from_pretrained(bert_name)
 bert = DistilBertModel.from_pretrained(bert_name, state_dict=state_dict)
-# tokenizer = BertTokenizer.from_pretrained('hfl/chinese-roberta-wwm-ext')
-# bert = LeBertModel.from_pretrained('hfl/chinese-roberta-wwm-ext')
+# tokenizer = BertTokenizer.from_pretrained('hfl/rbt3')
+# bert = LeBertModel.from_pretrained('hfl/rbt3')
 
 
 model = MyModel(bert)
 model = model.cuda()
-ema = EMA(model)
-# model.load_state_dict(torch.load("../model/model_best.pt"))
-ema.register()
+# ema = EMA(model)
+# # model.load_state_dict(torch.load("../model/model_best.pt"))
+# ema.register()
 
 
 path_train = '../data/train/train_fine.txt.00'
 path_coarse_train = '../data/train/train_coarse_trans.txt'
 path_test = '../data/train/train_fine.txt.01'
+path_coarse_noattr = '../data/train/train_coarse_noattr.txt'
 trainset = MyDataSet(path_train, tokenizer=tokenizer)
 traincoarseset = MyDataSet(path_coarse_train, tokenizer=tokenizer, mode='coarse')
-trainsetunion = ConcatDataset([trainset, traincoarseset])
+traincoarsenoattr = MyDataSet(path_coarse_noattr, tokenizer=tokenizer, mode='coarse')
+trainsetunion = ConcatDataset([trainset, traincoarseset, traincoarsenoattr])
 testset = MyDataSet(path_test, tokenizer=tokenizer)
 testsample = SequentialSampler(testset)
 
@@ -50,8 +51,8 @@ for name, param in model.named_parameters():
         else:
             other_decay_parameters.append(param)
 
-p = [{'params': bert_parameters, 'lr': 3e-5}, {'params': other_no_decay_parameters, 'lr': 5e-4, 'weight_decay': 0.0004}, 
-     {'params': other_decay_parameters, 'lr': 5e-4}]   
+p = [{'params': bert_parameters, 'lr': 5e-5}, {'params': other_no_decay_parameters, 'lr': 5e-5, 'weight_decay': 0.0001}, 
+     {'params': other_decay_parameters, 'lr': 5e-5}]   
 optimizer = torch.optim.Adam(p)
 #lrscheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.9)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.7, patience=2)
@@ -68,24 +69,24 @@ for epoch in range(10):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        if epoch > 4:
-            ema.update()
+        # if epoch > 4:
+        #     ema.update()
         running_loss += loss.item()
         if step % 100 == 99:
             print(f"Epoch {epoch+1}, step {step+1} : {running_loss}")
             running_loss = 0
         
         if step % 300 == 299:
-            if epoch > 4:
-                ema.apply_shadow()
+            # if epoch > 4:
+            #     ema.apply_shadow()
                 
             p = evaluate(testload, model)
             if p > best_p:
                 p = best_p
                 torch.save(model.state_dict(), f'../model/model_best.pt')
             
-            if epoch > 4:
-                ema.restore()
+            # if epoch > 4:
+            #     ema.restore()
                 
             scheduler.step(p)
                 

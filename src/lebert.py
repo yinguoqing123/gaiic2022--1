@@ -41,6 +41,7 @@ class LeBertModel(BertPreTrainedModel):
         self.encoder = BertEncoder(config)
 
         self.pooler = BertPooler(config) if add_pooling_layer else None
+        self.visual_ln = nn.LayerNorm(config.hidden_size, eps=1e-12)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -169,7 +170,8 @@ class LeBertModel(BertPreTrainedModel):
             inputs_embeds=inputs_embeds,
             past_key_values_length=past_key_values_length,
         )
-        embedding_output = torch.cat([embedding_output, visual_embeds.unsqueeze(dim=1)], dim=1)
+        visual_embeds = self.visual_ln(visual_embeds).unsqueeze(dim=1)
+        embedding_output = torch.cat([embedding_output, visual_embeds], dim=1)
         encoder_outputs = self.encoder(
             embedding_output,
             attention_mask=extended_attention_mask,

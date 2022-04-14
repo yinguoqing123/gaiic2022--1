@@ -53,7 +53,7 @@ def evaluate(dataset, model):
     attr_tp_cate = np.sum(attr_tp, axis=0)
     attr_posnum_cate = np.sum(attr_posnum, axis=0)
     all_attr_precision = sum(attr_tp_cate) / sum(attr_posnum_cate)
-    acc_match_precision = acc_match/2000
+    acc_match_precision = acc_match/5000
     # precision = all_attr_precision*0.5 + acc_match_precision * 0.5
     precision = acc_match_precision * 0.5 + all_attr_precision * 0.5
     print(f"图文匹配batch内top1 acc: {acc_match_precision}")
@@ -111,3 +111,21 @@ class EMA():
 #     ema.apply_shadow()
 #     # evaluate
 #     ema.restore()
+
+
+class FocalLoss(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        
+    def forward(self, pred, target):  
+        # pred: bsz, C
+        p1 = torch.sigmoid(-pred)
+        p2 = torch.sigmoid(pred)
+        loss_pos = -1 * p1 * torch.log(p2+1e-12) * target.float()
+        loss_neg = -1 * p2 * torch.log(p1+1e-12) * ( 1 - target).float()
+        
+        loss = torch.mean(torch.sum(loss_pos + loss_neg, dim=-1))
+        
+        return loss
+        
+    

@@ -33,6 +33,8 @@ valsMap = [{'高领': 0, '半高领': 0, '立领': 0, '连帽': 1, '可脱卸帽
            {'高帮': 0, '中帮': 0, '低帮': 1}]
 
 fw = open("../data/train/train_coarse_trans.txt", 'w', encoding='utf-8')
+fw_woattr = open("../data/train/train_coarse_noattr.txt", 'w', encoding='utf-8')
+
 with open("../data/train/train_coarse.txt") as f:
     lines = f.readlines()
     for line in lines:
@@ -62,5 +64,9 @@ with open("../data/train/train_coarse.txt") as f:
         if match['图文'] == 1:
             fw.write(json.dumps(line, ensure_ascii=False)+'\n')
             
+        else:
+            fw_woattr.write(json.dumps(line, ensure_ascii=False) + '\n')
+            
 fw.close()
+fw_woattr.close()
                 

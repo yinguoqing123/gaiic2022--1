@@ -16,6 +16,7 @@ import random
 # 总的attr precision: 0.8684450524395805
 # 加权precision: 0.7157225262197902
 # 各个key attr标签数: [873. 598. 599. 738.  26. 254.  83. 238. 275. 101. 288. 313.]
+# 版型 裙长  裤型 裤门襟
 
 tasks = ['领型', '袖长', '衣长', '版型', '裙长', '穿着方式', '类别', '裤型', '裤长', '裤门襟', 
         '闭合方式', '鞋帮高度']
@@ -85,19 +86,23 @@ class MyDataSet(Dataset):
             for line in lines:
                 line = json.loads(line.strip())
                 attrs = line['key_attr']  # coarse 中存在key_attr为空的  1029个 属性不匹配  10000个图文不匹配
-                if not attrs:
-                    continue
+                # if not attrs:
+                #     continue
                 images.append(line['feature'])
                 texts.append(line['title'])
                 label_match.append(line['match'].get('图文', 0))
                 task_names.append(attrs)
                 tasks_mask_ = [0] * 12
                 label_attr_ = [0] * 12
-                for key in attrs:
-                    if self.mode != 'fine':
-                        continue
-                    tasks_mask_[tasksMap[key]] = 1
-                    label_attr_[tasksMap[key]] = valsMap[tasksMap[key]][attrs[key]]
+                # if not label_match:
+                #     continue
+                # 图文匹配的数据才有属性匹配，图文不匹配 属性是否匹配未知
+                if label_match:
+                    for key in attrs:
+                        # if self.mode != 'fine':
+                        #     continue
+                        tasks_mask_[tasksMap[key]] = 1
+                        label_attr_[tasksMap[key]] = valsMap[tasksMap[key]][attrs[key]]
                     
                 label_attr.append(label_attr_)
                 tasks_mask.append(tasks_mask_)
@@ -110,6 +115,8 @@ class MyDataSet(Dataset):
     def __getitem__(self, idx):
         # 正样本增强
         title = self.texts[idx]
+        match = self.label_match[idx]
+        pos_title_mask, neg_title_mask = 1, 1
         # for val in self.task_names[idx].values():
         #     if val in replace_val and np.random.rand() < 0.3:
         #         title = title.replace(val, np.random.choice(replace_val[val]))
@@ -118,20 +125,28 @@ class MyDataSet(Dataset):
         text_ids, text_mask = text_encode['input_ids'], text_encode['attention_mask']
         # generate negative text： 只用作图文匹配的负样本
         neg_title = title
-        select_task = np.random.choice(list(self.task_names[idx].keys()))
         neg_tasks_mask = copy.deepcopy(self.tasks_mask[idx])
-        neg_tasks_mask[tasksMap[select_task]] = 0
-        for key in self.task_names[idx].keys():
-            if key != select_task:
-                if np.random.rand() < 0.4:   # 再取0.2的概率随机替换
-                    val = np.random.choice(list(valsMap[tasksMap[key]].keys()))
-                    neg_title = neg_title.replace(self.task_names[idx][key], val)
-                    
-        while True:
-            select_attr_val = np.random.choice(list(valsMap[tasksMap[select_task]].keys()))
-            if valsMap[tasksMap[select_task]][select_attr_val] != valsMap[tasksMap[select_task]][self.task_names[idx][select_task]]:
-                neg_title = neg_title.replace(self.task_names[idx][select_task], select_attr_val)
-                break
+        if len(self.task_names[idx]) > 0 and match: 
+            select_task = np.random.choice(list(self.task_names[idx].keys()))
+            neg_tasks_mask = copy.deepcopy(self.tasks_mask[idx])
+            neg_tasks_mask[tasksMap[select_task]] = 0
+            for key in self.task_names[idx].keys():
+                if key != select_task:
+                    if np.random.rand() < 0.3:   # 再取0.2的概率随机替换
+                        val = np.random.choice(list(valsMap[tasksMap[key]].keys()))
+                        neg_title = neg_title.replace(self.task_names[idx][key], val)
+            
+            while True:
+                select_attr_val = np.random.choice(list(valsMap[tasksMap[select_task]].keys()))
+                if valsMap[tasksMap[select_task]][select_attr_val] != valsMap[tasksMap[select_task]][self.task_names[idx][select_task]]:
+                    neg_title = neg_title.replace(self.task_names[idx][select_task], select_attr_val)
+                    break
+        
+        if len(self.task_names) < 1 and match:
+            neg_title_mask = 0
+        
+        if not match:
+            pos_title_mask = 0
         
         neg_text_encode =  self.tokenizer(neg_title, padding=True, truncation=True, max_length=32, return_attention_mask=True)
         neg_text_ids, neg_text_mask = neg_text_encode['input_ids'], neg_text_encode['attention_mask']
@@ -157,7 +172,8 @@ class MyDataSet(Dataset):
 
         return torch.tensor(self.imgs[idx]), torch.tensor(text_ids), torch.tensor(text_mask),  torch.tensor(self.label_attr[idx]), torch.tensor(self.tasks_mask[idx]), \
                 torch.tensor(neg_text_ids), torch.tensor(neg_text_mask), torch.tensor(neg_tasks_mask), \
-                torch.tensor(pos_attr_text_ids), torch.tensor(pos_attr_text_mask), torch.tensor(pos_tasks_mask)
+                torch.tensor(pos_attr_text_ids), torch.tensor(pos_attr_text_mask), torch.tensor(pos_tasks_mask), torch.tensor(pos_title_mask), \
+                torch.tensor(neg_title_mask)
     
     @classmethod
     def collate_fn(cls, x):
@@ -172,8 +188,10 @@ class MyDataSet(Dataset):
         pos_attr_text_ids = pad_sequence([sample[8] for sample in x], batch_first=True)
         pos_attr_text_mask = pad_sequence([sample[9] for sample in x], batch_first=True)
         pos_tasks_mask = torch.stack([sample[10] for sample in x], dim=0)
+        pos_title_mask = torch.stack([sample[11] for sample in x], dim=0)
+        neg_title_mask = torch.stack([sample[12] for sample in x], dim=0)
         return imgs, text_ids, text_mask, label_attr, tasks_mask, neg_text_ids, neg_text_mask, neg_tasks_mask, \
-            pos_attr_text_ids, pos_attr_text_mask, pos_tasks_mask
+            pos_attr_text_ids, pos_attr_text_mask, pos_tasks_mask, pos_title_mask, neg_title_mask
     
     
 class TestDataSet(Dataset):
