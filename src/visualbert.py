@@ -438,7 +438,7 @@ class DistilBertModel(DistilBertPreTrainedModel):
 
         self.embeddings = Embeddings(config)  # Embeddings
         self.transformer = Transformer(config)  # Encoder
-        self.LayerNorm = nn.LayerNorm(config.dim, eps=1e-12)
+        self.visual_ln = nn.LayerNorm(config.dim, eps=1e-12)
         # self.visual_proj = nn.Linear(2048, 768, bias=False)
         # Initialize weights and apply final processing
         self.post_init()
@@ -549,7 +549,7 @@ class DistilBertModel(DistilBertPreTrainedModel):
         # visual embedding
         if inputs_embeds is None:
             inputs_embeds = self.embeddings(input_ids)  # (bs, seq_length, dim)
-            visual_embeds = self.LayerNorm(visual_embeds).unsqueeze(dim=1)
+            visual_embeds = self.visual_ln(visual_embeds).unsqueeze(dim=1)
             inputs_embeds = torch.cat([inputs_embeds, visual_embeds], dim=1)
         return self.transformer(
             x=inputs_embeds,

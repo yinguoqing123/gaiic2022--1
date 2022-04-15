@@ -111,6 +111,10 @@ class MyModel(nn.Module):
         neg_sample = torch.cat([text_neg, img], dim=-1)
         pos_attr_sample = torch.cat([text_attr_pos, img], dim=-1)
 
+        # pos_sample = text_pos
+        # neg_sample = text_neg
+        # pos_attr_sample = text_attr_pos
+
         pos_sample = self.match(pos_sample)   # bsz, 13
         # pos_sample = self.mmoe(pos_sample)
         neg_sample = self.match(neg_sample)   # bsz, 13
@@ -121,17 +125,21 @@ class MyModel(nn.Module):
         # pos_sample = self.match(text_pos)
         # neg_sample = self.match(text_neg)
         # pos_attr_sample = self.match(text_attr_pos)
-        
+
         pos_sample[:, 0][pos_title_mask==0] = 1e12
         neg_sample[:, 0][neg_title_mask==0] = -1e12
+
         label_imgtext = torch.cat([torch.ones(pos_sample.shape[0],  1, device='cuda'), torch.zeros(pos_sample.shape[0], 1, device='cuda')], dim=-1)  # bsz, 3     
 
-        pred_imgtext = torch.stack([pos_sample[:, 0], neg_sample[:, 0]], dim=-1)  # bsz, 3 
+        pos_sample[:, 1:][mask==0] = 1e12
+        attr_score = torch.prod(torch.sigmoid(pos_sample[:, 1:]), dim=1)
+        pred_imgtext = torch.stack([pos_sample[:, 0]*attr_score, neg_sample[:, 0]], dim=-1)  # bsz, 2
 
         loss_imgtext = self.loss(pred_imgtext, label_imgtext)
 
         pos_attr_sample[:, 1:][mask==0] = -1e12
         loss_attr = self.loss(pos_attr_sample[:, 1:], pos_tasks_mask.float())
+    
         
         # aux_loss = self.imgTextLoss(img, text_pos)
         
@@ -140,7 +148,7 @@ class MyModel(nn.Module):
         # loss = imgtextloss / imgtextloss.detach().item()  + aux_loss / aux_loss.detach().item() * 0.3 + \
         #    attrloss / attrloss.detach().item() + label_att_aux / label_att_aux.detach().item() * 0.5
         
-        loss = torch.log(loss_imgtext) + torch.log(loss_attr)
+        loss = torch.log(loss_imgtext) + torch.log(loss_attr) 
         return loss
     
     def getAttrScore(self, img):
@@ -200,7 +208,7 @@ class MyModel(nn.Module):
     def getMetric(self, input):
         # 返回 trup positive 个数 分任务
         img, text_ids, text_mask, label_attr, mask, neg_text_ids, neg_text_mask, neg_tasks_mask, pos_attr_text_ids, \
-            pos_attr_text_mask, pos_tasks_mask, _, _ = input
+            pos_attr_text_mask, pos_tasks_mask, pos_title_mask, neg_title_mask  = input
 
         mask = mask.float()
         # text_pos = self.bert(text_ids, text_mask)[0][:, 0, :]  
@@ -221,40 +229,52 @@ class MyModel(nn.Module):
         pos_sample = torch.cat([text_pos, img], dim=-1)
         neg_sample = torch.cat([text_neg, img], dim=-1)
         pos_attr_sample = torch.cat([text_attr_pos, img], dim=-1)
+                
+        # pos_sample = text_pos
+        # neg_sample = text_neg
+        # pos_attr_sample = text_attr_pos
 
-        # pos_sample = F.sigmoid(self.mmoe(self.match(pos_sample)))
-        # neg_sample = F.sigmoid(self.mmoe(self.match(neg_sample)))
-        # pos_attr_sample = F.sigmoid(self.mmoe(self.match(pos_attr_sample)))
-        
-        # pos_sample = F.sigmoid(self.match(text_pos))
-        # neg_sample = F.sigmoid(self.match(text_neg))
-        # pos_attr_sample = F.sigmoid(self.match(text_attr_pos))
-        
+                # pos_sample = F.sigmoid(self.mmoe(self.match(pos_sample)))
+                # neg_sample = F.sigmoid(self.mmoe(self.match(neg_sample)))
+                # pos_attr_sample = F.sigmoid(self.mmoe(self.match(pos_attr_sample)))
+                
+                # pos_sample = F.sigmoid(self.match(text_pos))
+                # neg_sample = F.sigmoid(self.match(text_neg))
+                # pos_attr_sample = F.sigmoid(self.match(text_attr_pos))
+                
         pos_sample = F.sigmoid(self.match(pos_sample))
         neg_sample = F.sigmoid(self.match(neg_sample))
         pos_attr_sample = F.sigmoid(self.match(pos_attr_sample))
 
         pos_img_text_match = pos_sample[:, 0]
         neg_img_text_match = neg_sample[:, 0]
+                
+                # 重新处理一下
+        pos_img_text_match = pos_img_text_match[pos_title_mask==1]
+        neg_img_text_dual_match = neg_img_text_match[(neg_title_mask==1)&(torch.sum(mask, dim=1)>=1)]
+        neg_img_text_match = neg_img_text_match[(neg_title_mask==1)&(torch.sum(mask, dim=1)<1)]
 
-        acc_match = ( torch.sum(pos_img_text_match>0.5).cpu().item() + torch.sum(neg_img_text_match<0.5).cpu().item() )/2
+        acc_match_pos =  torch.sum(pos_img_text_match>0.5).cpu().item() 
+        acc_match_dual_neg = torch.sum(neg_img_text_dual_match<0.5).cpu().item() 
+        acc_match_neg = torch.sum(neg_img_text_match<0.5).cpu().item() 
+
 
         pos_attr_attr_match = pos_attr_sample[:, 1:] # bsz, 12
 
-                        # attr_out = self.mmoe(img)  # num_tasks, batch_size , task_category_num (列表)
-                        # tp_attr, pos_num = [], []
-                        # for i in range(len(attr_out)):
-                        #     pred = attr_out[i].argmax(dim=-1)  # batch_size
-                        #     tp_attr.append(torch.sum((pred == label_attr[:, i]).float()  * mask[:, i]).item())
-                        #     pos_num.append(torch.sum(mask[:, i]).item())
+                # attr_out = self.mmoe(img)  # num_tasks, batch_size , task_category_num (列表)
+                # tp_attr, pos_num = [], []
+                # for i in range(len(attr_out)):
+                #     pred = attr_out[i].argmax(dim=-1)  # batch_size
+                #     tp_attr.append(torch.sum((pred == label_attr[:, i]).float()  * mask[:, i]).item())
+                #     pos_num.append(torch.sum(mask[:, i]).item())
 
-                # 辅助任务
+                        # 辅助任务
         pos_attr_attr_match = torch.where(pos_attr_attr_match>0.5, torch.ones_like(pos_attr_attr_match, dtype=torch.int64), 
                                 torch.zeros_like(pos_attr_attr_match, dtype=torch.int64))
 
         tp_pos_attr_attr = torch.sum((pos_attr_attr_match == pos_tasks_mask.long()).float() * mask, dim=0).tolist()
 
         pos_num = torch.sum(mask, dim=0).tolist()
-        return acc_match , pos_num,  tp_pos_attr_attr   # tp_attr pos_num  : 各任务的true positive 和 sum positive
+        return acc_match_pos, acc_match_dual_neg, acc_match_neg , pos_num,  tp_pos_attr_attr  # tp_attr pos_num  : 各任务的true positive 和 sum positive
     
 

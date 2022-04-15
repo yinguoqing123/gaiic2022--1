@@ -1,3 +1,4 @@
+from distutils.command.build_scripts import first_line_re
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -15,6 +16,7 @@ bert_name = 'sentence-transformers/clip-ViT-B-32-multilingual-v1'
 
 state_dict = torch.load("../pretrained_model/clip-ViT-B-32-multilingual-v1.bin")
 tokenizer = AutoTokenizer.from_pretrained(bert_name)
+
 bert = DistilBertModel.from_pretrained(bert_name, state_dict=state_dict)
 # tokenizer = BertTokenizer.from_pretrained('hfl/rbt3')
 # bert = LeBertModel.from_pretrained('hfl/rbt3')
@@ -22,24 +24,28 @@ bert = DistilBertModel.from_pretrained(bert_name, state_dict=state_dict)
 
 model = MyModel(bert)
 model = model.cuda()
-# ema = EMA(model)
-# # model.load_state_dict(torch.load("../model/model_best.pt"))
-# ema.register()
+ema = EMA(model)
+# model.load_state_dict(torch.load("../model/model_best.pt"))
+ema.register()
 
 
 path_train = '../data/train/train_fine.txt.00'
 path_coarse_train = '../data/train/train_coarse_trans.txt'
 path_test = '../data/train/train_fine.txt.01'
-path_coarse_noattr = '../data/train/train_coarse_noattr.txt'
+path_coarse_noattr = '../data/train/train_coarse_noattr.txt.00'
 trainset = MyDataSet(path_train, tokenizer=tokenizer)
 traincoarseset = MyDataSet(path_coarse_train, tokenizer=tokenizer, mode='coarse')
 traincoarsenoattr = MyDataSet(path_coarse_noattr, tokenizer=tokenizer, mode='coarse')
-trainsetunion = ConcatDataset([trainset, traincoarseset, traincoarsenoattr])
+trainsetunion = ConcatDataset([trainset, traincoarseset, traincoarsenoattr, traincoarsenoattr])
+
 testset = MyDataSet(path_test, tokenizer=tokenizer)
-testsample = SequentialSampler(testset)
+path_coarse_noattr_test = '../data/train/train_coarse_noattr.txt.01'
+testcoarsetnoattr = MyDataSet(path_coarse_noattr_test, tokenizer=tokenizer, mode='coarse')
+testunion = ConcatDataset([testset, testcoarsetnoattr])
+testsample = SequentialSampler(testunion)
 
 trainload = DataLoader(trainsetunion, batch_size=128, shuffle=True, collate_fn=trainset.collate_fn, num_workers=8)
-testload = DataLoader(testset, batch_size=128, sampler=testsample, collate_fn=testset.collate_fn, num_workers=8)
+testload = DataLoader(testunion, batch_size=128, sampler=testsample, collate_fn=testset.collate_fn, num_workers=8)
 
 bert_parameters = list(model.bert.parameters())
 other_no_decay_parameters = []
@@ -58,6 +64,7 @@ optimizer = torch.optim.Adam(p)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.7, patience=2)
 
 best_p = evaluate(testload, model)
+ema_first = True
 for epoch in range(10):
     step = 0
     running_loss = 0
@@ -69,7 +76,7 @@ for epoch in range(10):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        # if epoch > 4:
+        # if epoch >= 4:
         #     ema.update()
         running_loss += loss.item()
         if step % 100 == 99:
@@ -77,16 +84,27 @@ for epoch in range(10):
             running_loss = 0
         
         if step % 300 == 299:
-            # if epoch > 4:
-            #     ema.apply_shadow()
+            
+            if epoch >= 4 and ema_first:
+                ema.register()
+                ema_first = False
                 
             p = evaluate(testload, model)
             if p > best_p:
                 p = best_p
                 torch.save(model.state_dict(), f'../model/model_best.pt')
-            
-            # if epoch > 4:
-            #     ema.restore()
+                if not ema_first:
+                    ema.update()
+                    print(" ----  ema更新权重 -----")
+                    ema.apply_shadow()
+                    p = evaluate(testload, model)
+                    if p > best_p:
+                        best_p = p
+                        torch.save(model.state_dict(), f'../model/model_best.pt')
+                    ema.restore()
                 
             scheduler.step(p)
+            
+
+
                 

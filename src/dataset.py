@@ -90,14 +90,15 @@ class MyDataSet(Dataset):
                 #     continue
                 images.append(line['feature'])
                 texts.append(line['title'])
-                label_match.append(line['match'].get('图文', 0))
+                img_text_match = line['match'].get('图文', 0)
+                label_match.append(img_text_match)
                 task_names.append(attrs)
                 tasks_mask_ = [0] * 12
                 label_attr_ = [0] * 12
                 # if not label_match:
                 #     continue
                 # 图文匹配的数据才有属性匹配，图文不匹配 属性是否匹配未知
-                if label_match:
+                if img_text_match:
                     for key in attrs:
                         # if self.mode != 'fine':
                         #     continue
@@ -147,6 +148,9 @@ class MyDataSet(Dataset):
         
         if not match:
             pos_title_mask = 0
+            
+        if match and np.random.rand() < 0.4:
+            neg_title_mask = 0
         
         neg_text_encode =  self.tokenizer(neg_title, padding=True, truncation=True, max_length=32, return_attention_mask=True)
         neg_text_ids, neg_text_mask = neg_text_encode['input_ids'], neg_text_encode['attention_mask']

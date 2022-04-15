@@ -41,11 +41,13 @@ valsMap = [{'高领': 0, '半高领': 0, '立领': 0, '连帽': 1, '可脱卸帽
 
 def evaluate(dataset, model):
     model.eval()
-    acc_match, attr_tp, attr_posnum  = 0, [], [], 
+    acc_match_pos, acc_match_dual_neg, acc_match_neg, attr_tp, attr_posnum  = 0, 0, 0, [], [], 
     for input in dataset:
         input = [f.cuda() for f in input]
-        acc_match_batch, attr_posnum_batch, attr_tp_batch,  = model.getMetric(input) 
-        acc_match += acc_match_batch
+        acc_match_pos_batch, acc_match_dual_neg_batch, acc_match_neg_batch, attr_posnum_batch, attr_tp_batch,  = model.getMetric(input) 
+        acc_match_pos += acc_match_pos_batch
+        acc_match_dual_neg += acc_match_dual_neg_batch
+        acc_match_neg += acc_match_neg_batch
         attr_tp.append(attr_tp_batch)
         attr_posnum.append(attr_posnum_batch) 
             
@@ -53,10 +55,14 @@ def evaluate(dataset, model):
     attr_tp_cate = np.sum(attr_tp, axis=0)
     attr_posnum_cate = np.sum(attr_posnum, axis=0)
     all_attr_precision = sum(attr_tp_cate) / sum(attr_posnum_cate)
-    acc_match_precision = acc_match/5000
+    acc_match_pos_precision = acc_match_pos/5000
+    acc_match_dual_neg_precision = acc_match_dual_neg / 5000
+    acc_match_neg_precision = acc_match_neg/1412
     # precision = all_attr_precision*0.5 + acc_match_precision * 0.5
-    precision = acc_match_precision * 0.5 + all_attr_precision * 0.5
-    print(f"图文匹配batch内top1 acc: {acc_match_precision}")
+    precision = (acc_match_pos_precision + acc_match_neg_precision) /2 * 0.5 + all_attr_precision * 0.5
+    print(f"图文匹配pos acc: {acc_match_pos_precision}")
+    print(f"图文匹配pos对应的neg acc: {acc_match_dual_neg_precision}")
+    print(f"图文匹配neg acc: {acc_match_neg_precision}")
     print(f"各个key attr的 precision: {attr_tp_cate/attr_posnum_cate}")
     print(f"总的attr precision: {all_attr_precision}")
     print(f"加权precision: {precision}")
@@ -65,7 +71,7 @@ def evaluate(dataset, model):
     return precision
 
 class EMA():
-    def __init__(self, model, decay=0.9):
+    def __init__(self, model, decay=0.95):
         self.model = model
         self.decay = decay
         self.shadow = {}
