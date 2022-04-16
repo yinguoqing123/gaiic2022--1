@@ -100,8 +100,8 @@ class MyDataSet(Dataset):
                 # 图文匹配的数据才有属性匹配，图文不匹配 属性是否匹配未知
                 if img_text_match:
                     for key in attrs:
-                        # if self.mode != 'fine':
-                        #     continue
+                        if self.mode == 'coarse' and key == '衣长':
+                            continue
                         tasks_mask_[tasksMap[key]] = 1
                         label_attr_[tasksMap[key]] = valsMap[tasksMap[key]][attrs[key]]
                     
@@ -149,8 +149,8 @@ class MyDataSet(Dataset):
         if not match:
             pos_title_mask = 0
             
-        if match and np.random.rand() < 0.4:
-            neg_title_mask = 0
+        # if match and np.random.rand() < 0.4:
+        #     neg_title_mask = 0
         
         neg_text_encode =  self.tokenizer(neg_title, padding=True, truncation=True, max_length=32, return_attention_mask=True)
         neg_text_ids, neg_text_mask = neg_text_encode['input_ids'], neg_text_encode['attention_mask']

@@ -49,7 +49,7 @@ tokenizer = AutoTokenizer.from_pretrained(bert_name)
 bert = DistilBertModel.from_pretrained(bert_name, state_dict=state_dict)
 
 
-model = MyModel(bert=bert, num_tasks=13, dims=2048)
+model = MyModel(bert=bert, num_tasks=12, dims=2048)
 model.load_state_dict(torch.load("../model/model_best.pt"))
 model = model.cuda()
 
@@ -69,7 +69,7 @@ for input in dataloader:
     label_attr, mask = input[-2:]  # mask: bsz, num_task
     label_attr = label_attr.cpu().numpy()
     mask = mask.cpu().numpy()
-    input = input[:-2]
+    input = input[:-1]
     input = [f.cuda() for f in input]
     imgtextscore, attrscore = model.getSubmit(input)  # attrscore: bsz, num_task
     #imgtextscore = np.where(imgtextscore>0.4, 1, 0)
@@ -78,11 +78,45 @@ for input in dataloader:
         task_nm = tasks_array[mask[i]==1]
         task_val = attrscore[i][mask[i]==1]
         # flag = [1 if val>0.5 else 0 for val in task_val]
-        flag = (label_attr[i][mask[i]==1] == task_val).astype(int)
-        tmp = list(zip(task_nm, flag))
+        # flag = (label_attr[i][mask[i]==1] == task_val).astype(int)
+        tmp = list(zip(task_nm, task_val))
         attr_match.append(tmp)
         
 img_name = dataset.names
+
+with open("../data/submit.json", "w", encoding='utf-8') as f:
+    for i in range(len(img_name)):
+        d = {'img_name': img_name[i]}
+        attr = {}
+        # attr['图文'] =  1 if match_label[i] > 0.5 else 0
+        attr['图文'] = float(match_label[i])
+        for query, val in attr_match[i]:
+            attr[query] = float(val)
+        d['match'] = attr
+        d = json.dumps(d, ensure_ascii=False)
+        f.write(d+'\n')
+        
+
+f1 = open("../data/submit_0.9456.json", "r", encoding='utf-8')
+lines1 = f1.readlines()
+
+f2 = open("../data/submit.json", "r", encoding='utf-8')
+lines2 = f2.readlines()
+
+f3 = open("../data/submit_melt.json", "w", encoding='utf-8')
+
+for i in range(len(lines1)):
+    a1 = json.loads(lines1[i])
+    a2 = json.loads(lines2[i])
+    d = {'img_name': a1['img_name']}
+    attr = a2['match']
+    attr['图文'] = 1 if float(a1['match']['图文']) > 0.5 else 0
+    d['match'] = attr
+    for key in attr:
+        if key != '图文':
+            attr[key] = 1 if (0.6 * float(a1['match'][key]) + 0.4 * a2['match'][key] )   > 0.5 else 0
+    d = json.dumps(d, ensure_ascii=False)
+    f3.write(d+'\n')
 
 with open("../data/submit.json", "w", encoding='utf-8') as f:
     for i in range(len(img_name)):

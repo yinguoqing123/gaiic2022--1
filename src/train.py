@@ -59,15 +59,15 @@ for name, param in model.named_parameters():
         else:
             other_decay_parameters.append(param)
 
-p = [{'params': bert_parameters, 'lr': 5e-5}, {'params': other_no_decay_parameters, 'lr': 5e-5, 'weight_decay': 0.0001}, 
-     {'params': other_decay_parameters, 'lr': 5e-5}]   
+p = [{'params': bert_parameters, 'lr': 5e-5}, {'params': other_no_decay_parameters, 'lr': 4e-4, 'weight_decay': 0.0001}, 
+     {'params': other_decay_parameters, 'lr': 4e-4}]   
 optimizer = torch.optim.Adam(p)
 #lrscheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.9)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.7, patience=2)
 
 best_p = evaluate(testload, model)
 ema_first = True
-for epoch in range(10):
+for epoch in range(20):
     step = 0
     running_loss = 0
     for input in trainload:
@@ -93,7 +93,7 @@ for epoch in range(10):
                 
             p = evaluate(testload, model)
             if p > best_p:
-                p = best_p
+                best_p = p
                 torch.save(model.state_dict(), f'../model/model_best.pt')
                 # if not ema_first:
                 #     ema.update()
@@ -107,6 +107,11 @@ for epoch in range(10):
                 
             scheduler.step(p)
             
+    p = evaluate(testload, model)
+    if p > best_p:
+        best_p = p
+        torch.save(model.state_dict(), f'../model/model_best.pt')
+    
 
 
                 

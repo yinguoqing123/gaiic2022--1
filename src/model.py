@@ -11,14 +11,13 @@ class MMoE(nn.Module):
         self.num_experts = num_experts
         self.num_experts_spe = 1
         self.num_tasks = num_tasks
-        self.experts = nn.ModuleList([nn.Sequential(nn.Linear(dims, 256), nn.LeakyReLU(), nn.Linear(256, 128),  nn.LeakyReLU()) 
+        self.experts = nn.ModuleList([nn.Sequential(nn.Linear(dims, 256), nn.ReLU()) 
                                       for i in range(num_experts)])
-        # self.experts_spe = nn.ModuleDict({f'task_{task_index}': nn.ModuleList([nn.Sequential(nn.Linear(dims, 256), nn.ReLU(), nn.Linear(256, 128), nn.ReLU()) for _ in range(self.num_experts_spe)]) for task_index in range(self.num_tasks)})
+        self.experts_spe = nn.ModuleDict({f'task_{task_index}': nn.ModuleList([nn.Sequential(nn.Linear(dims, 256), nn.ReLU()) for _ in range(self.num_experts_spe)]) for task_index in range(self.num_tasks)})
         # self.gates = nn.ModuleList([nn.Sequential(nn.Linear(dims, 128), nn.ReLU(), nn.Linear(128, self.num_experts+self.num_experts_spe)) for i in range(num_tasks)])
-        self.gates = nn.ModuleList([nn.Linear(dims, self.num_experts) for i in range(num_tasks)])
+        self.gates = nn.ModuleList([nn.Sequential(nn.Linear(dims, self.num_experts+self.num_experts_spe)) for i in range(num_tasks)])
         self.label_nums = [14, 4, 3, 2, 3, 2, 4, 7, 4, 3, 6, 2]
-        self.classifies = nn.ModuleList([nn.Linear(128, num) for num in self.label_nums])
-
+        self.classifies = nn.ModuleList([nn.Linear(256, num) for num in self.label_nums])
         
     def forward(self, input):
         out_experts = []
@@ -27,15 +26,15 @@ class MMoE(nn.Module):
 
         out_experts = torch.stack(out_experts, dim=0).permute(1, 0, 2) # b, num_experts, 128
         
-        # out_experts_spe = []
-        # for task_index in range(self.num_tasks):
-        #     for layer in self.experts_spe[f'task_{task_index}']:
-        #         out_experts_spe.append(layer(input))   # num_task * num_experts_spe, bsz, dim
+        out_experts_spe = []
+        for task_index in range(self.num_tasks):
+            for layer in self.experts_spe[f'task_{task_index}']:
+                out_experts_spe.append(layer(input))   # num_task * num_experts_spe, bsz, dim
                 
-        # out_experts_spe = torch.stack(out_experts_spe, dim=0).reshape(self.num_tasks, self.num_experts_spe, -1, 128).permute(2, 0, 1, 3)  #  bsz, num_task, num_experts_spe, dim
-        # bsz, num_task, num_experts_spe, dim = out_experts_spe.size()
+        out_experts_spe = torch.stack(out_experts_spe, dim=0).reshape(self.num_tasks, self.num_experts_spe, -1, 256).permute(2, 0, 1, 3)  #  bsz, num_task, num_experts_spe, dim
+        bsz, num_task, num_experts_spe, dim = out_experts_spe.size()
 
-        # out_experts = torch.cat([out_experts.unsqueeze(dim=1).expand(-1, num_task, -1, -1), out_experts_spe], dim=2)
+        out_experts = torch.cat([out_experts.unsqueeze(dim=1).expand(-1, num_task, -1, -1), out_experts_spe], dim=2)
         
         out_gates = []
         for layer in self.gates:
@@ -44,13 +43,12 @@ class MMoE(nn.Module):
         out_gates = torch.stack(out_gates, dim=0).permute(1, 0, 2)  # b, num_tasks, num_experts+num_experts_spe
         out_gates = torch.softmax(out_gates, dim=-1)
 
-        out = out_experts.unsqueeze(dim=1) * out_gates.unsqueeze(dim=-1)  # b, num_tasks,  num_experts+num_experts_spe, 128
+        out = out_experts * out_gates.unsqueeze(dim=-1)  # b, num_tasks,  num_experts+num_experts_spe, 128
         out = torch.sum(out, dim=2)  # b, num_tasks, 128
         
         final = []
         for i in range(len(self.label_nums)):
             prob = self.classifies[i](out[:, i, :])
-            #prob = torch.softmax(prob, dim=-1)
             final.append(prob)
             
         return final  #  num_tasks, batch_size , (task_category_num)  (列表)
@@ -76,114 +74,71 @@ class ClassifyLoss(nn.Module):
         return loss
     
 class MyModel(nn.Module):
-    def __init__(self, bert, experts=10, num_tasks=13, dims=2048) -> None:
+    def __init__(self, bert, experts=10, num_tasks=12, dims=2048) -> None:
         super().__init__()
         self.bert = bert
-        self.imgprocess = nn.Linear(dims, 768, bias=False)  # 图像特征变换用于匹配文本特征
-        # self.dense2 = nn.Sequential(nn.Linear(768*2, 512), nn.LeakyReLU())
-        # self.match = nn.Sequential(nn.Linear(768, 512), nn.LeakyReLU(), nn.Linear(512, 256), nn.LeakyReLU(), 
-        #                            nn.Linear(256, 13))
-        self.match = nn.Sequential(nn.Linear(768*2, 512), nn.LeakyReLU(), nn.Linear(512, 1))
-        self.mmoe = MMoE(experts, num_tasks)
-        # self.textprocess = nn.Linear(768, 128)
-        # self.attmatch = nn.Sequential(nn.Linear(512, 128), nn.LeakyReLU(), 
-        #                                   nn.Linear(128, 12))
-        
+        # self.imgprocess = nn.Linear(dims, 768, bias=False)  # 图像特征变换用于匹配文本特征
+        self.imgprocess = nn.Sequential(nn.Linear(2048, 1024), nn.LeakyReLU(), nn.Linear(1024, 768))
+        self.imgtextmatch = nn.Sequential(nn.Linear(768, 512), nn.LeakyReLU(), nn.Linear(512, 1))
+        self.mmoe = MMoE(experts, num_tasks)  
         self.attrloss = ClassifyLoss()
         self.loss = nn.BCEWithLogitsLoss()
-        # self.loss = FocalLoss()
-        # weight = torch.tensor([2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2], dtype=torch.float, device='cuda')
-        # self.loss = nn.MultiLabelSoftMarginLoss(reduction='sum', weight=weight)
 
-        # weight = torch.tensor([2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2], dtype=torch.float, device='cuda')
-        # self.loss = nn.MultiLabelSoftMarginLoss(reduction='sum', weight=weight)
-
-    # def imgprocess(self, img):
-    #     # img 信息提取
-    #     img_mlp = self.dense1(img)
-    #     img_cv = self.imgconv(img.unsqueeze(dim=1))
-    #     img = self.imgfuse(torch.cat([img_mlp, img_cv], dim=-1))
-    #     return img
-        
     def forward(self, input):
         img, text_ids, text_mask, label_attr, mask, neg_text_ids, neg_text_mask, neg_tasks_mask, \
             pos_attr_text_ids, pos_attr_text_mask, pos_tasks_mask, pos_title_mask, neg_title_mask = input
         mask = mask.float()
         img = self.imgprocess(img)
-        # text_mask = torch.cat([text_mask, torch.ones(text_mask.shape[0], 1, device='cuda', dtype=torch.int64)], dim=-1)
-        text_pos = self.bert(text_ids, text_mask)[0][:, 0, :] 
-        # neg_text_mask = torch.cat([neg_text_mask, torch.ones(neg_text_mask.shape[0], 1, device='cuda', dtype=torch.int64)], dim=-1) 
-        text_neg = self.bert(neg_text_ids, neg_text_mask,)[0][:, 0, :]
-        # pos_attr_text_mask = torch.cat([pos_attr_text_mask, torch.ones(pos_attr_text_mask.shape[0], 1, device='cuda', dtype=torch.int64)], dim=-1)
-        # text_attr_pos = self.bert(pos_attr_text_ids, pos_attr_text_mask, visual_embeds=img)[0][:, 0, :]
-                
+        text_mask = torch.cat([text_mask, torch.ones(text_mask.shape[0], 1, device='cuda', dtype=torch.int64)], dim=-1)
+        text_pos = self.bert(text_ids, text_mask, visual_embeds=img)[0][:, 0, :] 
+        neg_text_mask = torch.cat([neg_text_mask, torch.ones(neg_text_mask.shape[0], 1, device='cuda', dtype=torch.int64)], dim=-1) 
+        text_neg = self.bert(neg_text_ids, neg_text_mask, visual_embeds=img)[0][:, 0, :]                
 
-        pos_sample = torch.cat([text_pos, img], dim=-1)
-        neg_sample = torch.cat([text_neg, img], dim=-1)
-        # pos_attr_sample = torch.cat([text_attr_pos, img], dim=-1)
+        # pos_sample = torch.cat([text_pos, img], dim=-1)
+        # neg_sample = torch.cat([text_neg, img], dim=-1)
+        
+        pos_sample = text_pos
+        neg_sample = text_neg
 
-        # pos_sample = text_pos
-        # neg_sample = text_neg
-        # pos_attr_sample = text_attr_pos
-
-        pos_sample = self.match(pos_sample).squeeze()   # bsz, 13
-        # pos_sample = self.mmoe(pos_sample)
-        neg_sample = self.match(neg_sample).squeeze()   # bsz, 13
-        # neg_sample = self.mmoe(neg_sample)
-        # pos_attr_sample = self.match(pos_attr_sample)
-        # pos_attr_sample = self.mmoe(pos_attr_sample)
-
-        # pos_sample = self.match(text_pos)
-        # neg_sample = self.match(text_neg)
-        # pos_attr_sample = self.match(text_attr_pos)
+        pos_sample = self.imgtextmatch(pos_sample).squeeze()   # bsz, 13
+        neg_sample = self.imgtextmatch(neg_sample).squeeze()   # bsz, 13
 
         pos_sample[pos_title_mask==0] = 1e12
         neg_sample[neg_title_mask==0] = -1e12
 
         label_imgtext = torch.cat([torch.ones(pos_sample.shape[0],  1, device='cuda'), torch.zeros(pos_sample.shape[0], 1, device='cuda')], dim=-1)  # bsz, 3     
-
-        # pos_sample[:, 1:][mask==0] = 1e12
-
         pred_imgtext = torch.stack([pos_sample, neg_sample], dim=-1)  # bsz, 2
-
         loss_imgtext = self.loss(pred_imgtext, label_imgtext)
 
-        # pos_attr_sample[:, 1:][mask==0] = -1e12
-        # loss_attr = self.loss(pos_attr_sample[:, 1:], pos_tasks_mask.float())
-    
         attr_pred = self.mmoe(img) 
-        loss_attr2 = self.attrloss(attr_pred, label_attr, mask)   
-        # aux_loss = self.imgTextLoss(img, text_pos)
+        loss_attr = self.attrloss(attr_pred, label_attr, mask)  
         
-        # loss = imgtextloss / imgtextloss.detach().item() + attrloss / attrloss.detach().item() + \
-        #     aux_loss / aux_loss.detach().item() * 0.3 + attr_aux_loss / attr_aux_loss.detach() * 0.4
-        # loss = imgtextloss / imgtextloss.detach().item()  + aux_loss / aux_loss.detach().item() * 0.3 + \
-        #    attrloss / attrloss.detach().item() + label_att_aux / label_att_aux.detach().item() * 0.5
-        
-        loss = torch.log(loss_imgtext) + torch.log(loss_attr2)
+        aux_loss = self.imgTextLoss(img, text_pos) 
+
+        loss = torch.log(loss_imgtext) + torch.log(max(loss_attr, torch.tensor(1e-12, device='cuda'))) + torch.log(max(aux_loss, torch.tensor(1e-10, device='cuda'))) * 0.2
         return loss
     
     def getAttrScore(self, img):
         attr_out = self.mmoe(img)
         scores = []
         for i in range(len(attr_out)):
-            out = attr_out[i]
+            out = torch.softmax(attr_out[i], dim=-1)
             scores.append(out)
         return scores
     
     @torch.no_grad()
     def getSubmit(self, input):
-        img, text_ids, text_mask = input
+        img, text_ids, text_mask, label_attr = input
         img = self.imgprocess(img)
         text_mask = torch.cat([text_mask, torch.ones(text_mask.shape[0], 1, device='cuda', dtype=torch.int64)], dim=-1)
         text = self.bert(text_ids, text_mask, visual_embeds=img)[0][:, 0, :]
-        sample =  torch.cat([text, img], dim=-1)
-        sample = F.sigmoid(self.match(sample).unsqueeze())
+        # sample =  torch.cat([text, img], dim=-1)
+        sample = F.sigmoid(self.imgtextmatch(text).squeeze())
         img_text_match_score = sample.cpu().numpy()
         
         attrscore = self.getAttrScore(img)
         for i in range(len(attrscore)):
-            attrscore[i] = attrscore[i].argmax(dim=-1)
+            attrscore[i] = torch.gather(attrscore[i], 1, label_attr[:, i].view(-1, 1)).squeeze()
         attrscore = torch.stack(attrscore, dim=0).permute(1, 0).cpu().numpy() # bsz, num_task
         return img_text_match_score, attrscore
         
@@ -227,45 +182,25 @@ class MyModel(nn.Module):
             pos_attr_text_mask, pos_tasks_mask, pos_title_mask, neg_title_mask  = input
 
         mask = mask.float()
-        # text_pos = self.bert(text_ids, text_mask)[0][:, 0, :]  
-        # text_neg = self.bert(neg_text_ids, neg_text_mask)[0][:, 0, :]
-        # text_attr_pos = self.bert(pos_attr_text_ids, pos_attr_text_mask)[0][:, 0, :]
-
-        # img = self.imgprocess(img)
 
         img = self.imgprocess(img)
-        # text_mask = torch.cat([text_mask, torch.ones(text_mask.shape[0], 1, device='cuda', dtype=torch.int64)], dim=-1)
-        text_pos = self.bert(text_ids, text_mask)[0][:, 0, :] 
-        # neg_text_mask = torch.cat([neg_text_mask, torch.ones(neg_text_mask.shape[0], 1, device='cuda', dtype=torch.int64)], dim=-1) 
-        text_neg = self.bert(neg_text_ids, neg_text_mask)[0][:, 0, :]
-        # pos_attr_text_mask = torch.cat([pos_attr_text_mask, torch.ones(pos_attr_text_mask.shape[0], 1, device='cuda', dtype=torch.int64)], dim=-1)
-        # text_attr_pos = self.bert(pos_attr_text_ids, pos_attr_text_mask, visual_embeds=img)[0][:, 0, :]
-
-
-        pos_sample = torch.cat([text_pos, img], dim=-1)
-        neg_sample = torch.cat([text_neg, img], dim=-1)
-        # pos_attr_sample = torch.cat([text_attr_pos, img], dim=-1)
+        text_mask = torch.cat([text_mask, torch.ones(text_mask.shape[0], 1, device='cuda', dtype=torch.int64)], dim=-1)
+        text_pos = self.bert(text_ids, text_mask, visual_embeds=img)[0][:, 0, :] 
+        neg_text_mask = torch.cat([neg_text_mask, torch.ones(neg_text_mask.shape[0], 1, device='cuda', dtype=torch.int64)], dim=-1) 
+        text_neg = self.bert(neg_text_ids, neg_text_mask, visual_embeds=img)[0][:, 0, :]
+    
+        # pos_sample = torch.cat([text_pos, img], dim=-1)
+        # neg_sample = torch.cat([text_neg, img], dim=-1)
+        
+        pos_sample = text_pos
+        neg_sample = text_neg
                 
-        # pos_sample = text_pos
-        # neg_sample = text_neg
-        # pos_attr_sample = text_attr_pos
-
-                # pos_sample = F.sigmoid(self.mmoe(self.match(pos_sample)))
-                # neg_sample = F.sigmoid(self.mmoe(self.match(neg_sample)))
-                # pos_attr_sample = F.sigmoid(self.mmoe(self.match(pos_attr_sample)))
-                
-                # pos_sample = F.sigmoid(self.match(text_pos))
-                # neg_sample = F.sigmoid(self.match(text_neg))
-                # pos_attr_sample = F.sigmoid(self.match(text_attr_pos))
-                
-        pos_sample = F.sigmoid(self.match(pos_sample).squeeze())
-        neg_sample = F.sigmoid(self.match(neg_sample).squeeze())
-        # pos_attr_sample = F.sigmoid(self.match(pos_attr_sample))
+        pos_sample = F.sigmoid(self.imgtextmatch(pos_sample).squeeze())
+        neg_sample = F.sigmoid(self.imgtextmatch(neg_sample).squeeze())
 
         pos_img_text_match = pos_sample
         neg_img_text_match = neg_sample
-                
-                # 重新处理一下
+
         pos_img_text_match = pos_img_text_match[pos_title_mask==1]
         neg_img_text_dual_match = neg_img_text_match[(neg_title_mask==1)&(torch.sum(mask, dim=1)>=1)]
         neg_img_text_match = neg_img_text_match[(neg_title_mask==1)&(torch.sum(mask, dim=1)<1)]
@@ -273,25 +208,6 @@ class MyModel(nn.Module):
         acc_match_pos =  torch.sum(pos_img_text_match>0.5).cpu().item() 
         acc_match_dual_neg = torch.sum(neg_img_text_dual_match<0.5).cpu().item() 
         acc_match_neg = torch.sum(neg_img_text_match<0.5).cpu().item() 
-
-
-        #pos_attr_attr_match = pos_attr_sample[:, 1:] # bsz, 12
-
-                # attr_out = self.mmoe(img)  # num_tasks, batch_size , task_category_num (列表)
-                # tp_attr, pos_num = [], []
-                # for i in range(len(attr_out)):
-                #     pred = attr_out[i].argmax(dim=-1)  # batch_size
-                #     tp_attr.append(torch.sum((pred == label_attr[:, i]).float()  * mask[:, i]).item())
-                #     pos_num.append(torch.sum(mask[:, i]).item())
-
-        #                 # 辅助任务
-        # pos_attr_attr_match = torch.where(pos_attr_attr_match>0.5, torch.ones_like(pos_attr_attr_match, dtype=torch.int64), 
-        #                         torch.zeros_like(pos_attr_attr_match, dtype=torch.int64))
-
-        # tp_pos_attr_attr = torch.sum((pos_attr_attr_match == pos_tasks_mask.long()).float() * mask, dim=0).tolist()
-
-        # pos_num = torch.sum(mask, dim=0).tolist()
-        
 
         attr_out = self.mmoe(img)  # num_tasks, batch_size , task_category_num (列表)
         tp_attr, pos_num = [], []

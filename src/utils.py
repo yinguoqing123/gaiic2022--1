@@ -70,6 +70,7 @@ def evaluate(dataset, model):
     print(f"mmoe acc: {tp_attr2_cate/pos_num2_cate}")
     print(f"mmoe 总的acc: {sum(tp_attr2_cate)/sum(pos_num2_cate)}")
     print(f"加权acc: {precision}")
+    print(f"各标签数: {pos_num2_cate}")
     print("============================================")
     return precision
 
@@ -137,4 +138,3 @@ class FocalLoss(torch.nn.Module):
         
         return loss
         
-    
