@@ -77,8 +77,8 @@ for input in dataloader:
     for i in range(len(attrscore)):
         task_nm = tasks_array[mask[i]==1]
         task_val = attrscore[i][mask[i]==1]
-        flag = [1 if val>0.5 else 0 for val in task_val]
-        #flag = (label_attr[i][mask[i]==1] == task_val).astype(int)
+        # flag = [1 if val>0.5 else 0 for val in task_val]
+        flag = (label_attr[i][mask[i]==1] == task_val).astype(int)
         tmp = list(zip(task_nm, flag))
         attr_match.append(tmp)
         

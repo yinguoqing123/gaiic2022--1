@@ -41,32 +41,35 @@ valsMap = [{'高领': 0, '半高领': 0, '立领': 0, '连帽': 1, '可脱卸帽
 
 def evaluate(dataset, model):
     model.eval()
-    acc_match_pos, acc_match_dual_neg, acc_match_neg, attr_tp, attr_posnum  = 0, 0, 0, [], [], 
+    acc_match_pos, acc_match_dual_neg, acc_match_neg,  tp_attr2, pos_num2  = 0, 0, 0, [], []
     for input in dataset:
         input = [f.cuda() for f in input]
-        acc_match_pos_batch, acc_match_dual_neg_batch, acc_match_neg_batch, attr_posnum_batch, attr_tp_batch,  = model.getMetric(input) 
+        acc_match_pos_batch, acc_match_dual_neg_batch, acc_match_neg_batch, \
+            tp_attr2_batch, pos_num2_batch = model.getMetric(input) 
         acc_match_pos += acc_match_pos_batch
         acc_match_dual_neg += acc_match_dual_neg_batch
         acc_match_neg += acc_match_neg_batch
-        attr_tp.append(attr_tp_batch)
-        attr_posnum.append(attr_posnum_batch) 
+        
+        tp_attr2.append(tp_attr2_batch)
+        pos_num2.append(pos_num2_batch) 
             
-    attr_tp, attr_posnum = np.array(attr_tp), np.array(attr_posnum)
-    attr_tp_cate = np.sum(attr_tp, axis=0)
-    attr_posnum_cate = np.sum(attr_posnum, axis=0)
-    all_attr_precision = sum(attr_tp_cate) / sum(attr_posnum_cate)
+   
     acc_match_pos_precision = acc_match_pos/5000
     acc_match_dual_neg_precision = acc_match_dual_neg / 5000
     acc_match_neg_precision = acc_match_neg/1412
+    tp_attr2, pos_num2 = np.array(tp_attr2), np.array(pos_num2)
+    tp_attr2_cate = np.sum(tp_attr2, axis=0)
+    pos_num2_cate = np.sum(pos_num2, axis=0)
+    
     # precision = all_attr_precision*0.5 + acc_match_precision * 0.5
-    precision = (acc_match_pos_precision + acc_match_neg_precision) /2 * 0.5 + all_attr_precision * 0.5
+    precision = (acc_match_pos_precision + acc_match_neg_precision) /2 * 0.5 + sum(tp_attr2_cate)/sum(pos_num2_cate) * 0.5
     print(f"图文匹配pos acc: {acc_match_pos_precision}")
     print(f"图文匹配pos对应的neg acc: {acc_match_dual_neg_precision}")
     print(f"图文匹配neg acc: {acc_match_neg_precision}")
-    print(f"各个key attr的 precision: {attr_tp_cate/attr_posnum_cate}")
-    print(f"总的attr precision: {all_attr_precision}")
-    print(f"加权precision: {precision}")
-    print(f"各个key attr标签数: {attr_posnum_cate}")
+   
+    print(f"mmoe acc: {tp_attr2_cate/pos_num2_cate}")
+    print(f"mmoe 总的acc: {sum(tp_attr2_cate)/sum(pos_num2_cate)}")
+    print(f"加权acc: {precision}")
     print("============================================")
     return precision
 

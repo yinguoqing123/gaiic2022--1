@@ -17,6 +17,8 @@ bert_name = 'sentence-transformers/clip-ViT-B-32-multilingual-v1'
 state_dict = torch.load("../pretrained_model/clip-ViT-B-32-multilingual-v1.bin")
 tokenizer = AutoTokenizer.from_pretrained(bert_name)
 
+# bert = AutoModel.from_pretrained(bert_name, state_dict=state_dict)
+
 bert = DistilBertModel.from_pretrained(bert_name, state_dict=state_dict)
 # tokenizer = BertTokenizer.from_pretrained('hfl/rbt3')
 # bert = LeBertModel.from_pretrained('hfl/rbt3')
@@ -24,9 +26,9 @@ bert = DistilBertModel.from_pretrained(bert_name, state_dict=state_dict)
 
 model = MyModel(bert)
 model = model.cuda()
-ema = EMA(model)
-# model.load_state_dict(torch.load("../model/model_best.pt"))
-ema.register()
+# ema = EMA(model)
+# # model.load_state_dict(torch.load("../model/model_best.pt"))
+# ema.register()
 
 
 path_train = '../data/train/train_fine.txt.00'
@@ -36,7 +38,7 @@ path_coarse_noattr = '../data/train/train_coarse_noattr.txt.00'
 trainset = MyDataSet(path_train, tokenizer=tokenizer)
 traincoarseset = MyDataSet(path_coarse_train, tokenizer=tokenizer, mode='coarse')
 traincoarsenoattr = MyDataSet(path_coarse_noattr, tokenizer=tokenizer, mode='coarse')
-trainsetunion = ConcatDataset([trainset, traincoarseset, traincoarsenoattr, traincoarsenoattr])
+trainsetunion = ConcatDataset([trainset, traincoarseset, traincoarsenoattr])
 
 testset = MyDataSet(path_test, tokenizer=tokenizer)
 path_coarse_noattr_test = '../data/train/train_coarse_noattr.txt.01'
@@ -85,23 +87,23 @@ for epoch in range(10):
         
         if step % 300 == 299:
             
-            if epoch >= 4 and ema_first:
-                ema.register()
-                ema_first = False
+            # if epoch >= 4 and ema_first:
+            #     ema.register()
+            #     ema_first = False
                 
             p = evaluate(testload, model)
             if p > best_p:
                 p = best_p
                 torch.save(model.state_dict(), f'../model/model_best.pt')
-                if not ema_first:
-                    ema.update()
-                    print(" ----  ema更新权重 -----")
-                    ema.apply_shadow()
-                    p = evaluate(testload, model)
-                    if p > best_p:
-                        best_p = p
-                        torch.save(model.state_dict(), f'../model/model_best.pt')
-                    ema.restore()
+                # if not ema_first:
+                #     ema.update()
+                #     print(" ----  ema更新权重 -----")
+                #     ema.apply_shadow()
+                #     p = evaluate(testload, model)
+                #     if p > best_p:
+                #         best_p = p
+                #         torch.save(model.state_dict(), f'../model/model_best.pt')
+                #     ema.restore()
                 
             scheduler.step(p)
             
