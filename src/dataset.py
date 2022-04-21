@@ -1,4 +1,6 @@
+from cProfile import label
 from os import truncate
+from unittest.util import _MAX_LENGTH
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader 
@@ -98,10 +100,11 @@ class MyDataSet(Dataset):
                 # if not label_match:
                 #     continue
                 # 图文匹配的数据才有属性匹配，图文不匹配 属性是否匹配未知
-                if img_text_match:
+               
+                if True:
                     for key in attrs:
-                        if self.mode == 'coarse' and key == '衣长':
-                            continue
+                        # if self.mode == 'coarse' and key == '衣长':
+                        #     continue
                         tasks_mask_[tasksMap[key]] = 1
                         label_attr_[tasksMap[key]] = valsMap[tasksMap[key]][attrs[key]]
                     
@@ -247,4 +250,99 @@ class TestDataSet(Dataset):
         label_attr = torch.stack([sample[3] for sample in x], dim=0)
         tasks_mask = torch.stack([sample[4] for sample in x], dim=0)
         return imgs, text_ids, text_mask, label_attr, tasks_mask
+    
+
+class PretrainDataSet(Dataset):
+    def __init__(self, path, tokenizer=None, mode='fine') -> None:
+        self.mode = mode
+        self.tokenizer = tokenizer
+        self.label_nums = [14, 4, 3, 2, 3, 2, 4, 7, 4, 3, 6, 2]
+        self.imgs, self.texts, self.label_match, self.label_attr , self.tasks_mask, self.task_names = self.read(path)
+        # label_attr: sample_number, 12
+        # tasks_mask: sample_number, 12
+    
+    def read(self, path):
+        images, texts, label_match, label_attr, tasks_mask, task_names = [], [], [], [], [], []  # label_atrr:  samples*num_tasks
+        with open(path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            for line in lines:
+                line = json.loads(line.strip())
+                attrs = line['key_attr']  # coarse 中存在key_attr为空的  1029个 属性不匹配  10000个图文不匹配
+                if not attrs:
+                    continue
+                images.append(line['feature'])
+                texts.append(line['title'])
+                img_text_match = line['match'].get('图文', 0)
+                label_match.append(img_text_match)
+                task_names.append(attrs)
+                tasks_mask_ = [0] * 12
+                label_attr_ = [0] * 12
+                # if not label_match:
+                #     continue
+                # 图文匹配的数据才有属性匹配，图文不匹配 属性是否匹配未知
+                if img_text_match:
+                    for key in attrs:
+                        # if self.mode == 'coarse' and key == '衣长':
+                        #     continue
+                        tasks_mask_[tasksMap[key]] = 1
+                        label_attr_[tasksMap[key]] = valsMap[tasksMap[key]][attrs[key]]
+                    
+                label_attr.append(label_attr_)
+                tasks_mask.append(tasks_mask_)
+        return images, texts, label_match, label_attr, tasks_mask, task_names
+                    
+                
+    def __len__(self):
+        return len(self.label_match)
+    
+    def __getitem__(self, idx):
+        # 正样本增强
+        title = self.texts[idx]
+        select_task = np.random.choice(list(self.task_names[idx].keys()))
+        for key in self.task_names[idx].keys():
+            if np.random.rand() > 0.3: 
+                # if self.task_names[idx][key] in replace_val and np.random.rand() < 0.3:
+                #     pos_attr_title = pos_attr_title.replace(self.task_names[idx][key], np.random.choice(replace_val[self.task_names[idx][key]]))
+                pass
+            elif key != select_task:
+                while True:
+                    val = np.random.choice(list(valsMap[tasksMap[key]].keys()))  # 随机替换
+                    if valsMap[tasksMap[key]][val] != valsMap[tasksMap[key]][self.task_names[idx][key]]:
+                        title = title.replace(self.task_names[idx][key], val)
+                        break
+
+        text_encode = self.tokenizer(title, padding=True, truncation=True, max_length=40, return_attention_mask=True)
+        text_ids, text_mask = text_encode['input_ids'], text_encode['attention_mask']
+
+        label_ids, label_mask = [-100] * len(text_ids), [0] * len(text_mask)
+        mask_id = self.tokenizer._convert_token_to_id_with_added_voc(self.tokenizer.mask_token)
+        val = self.task_names[idx][select_task]
+        start = title.index(val)
+        ids_start, ids_end = text_encode.char_to_token(start), text_encode.char_to_token(start+len(val)-1)
+        if not ids_end:
+            ids_end = 38   # 此时 title进行了截断，ids_end = max_length-1
+        label_ids[ids_start: ids_end + 1] = text_ids[ids_start: ids_end + 1]
+        label_mask[ids_start: ids_end + 1] = [1] * (ids_end - ids_start + 1)
+        if np.random.rand() < 0.8:
+            text_ids[ids_start: ids_end + 1] = [mask_id] * (ids_end - ids_start + 1)  
+        else:
+            val_sub = np.random.choice(list(valsMap[tasksMap[select_task]].keys()))
+            val_ids = self.tokenizer(val_sub, add_special_tokens=False)['input_ids'][:(ids_end-ids_start+1)]
+            val_ids = val_ids + (ids_end - ids_start + 1 - len(val_ids)) * [mask_id]
+            text_ids[ids_start: ids_end + 1] = val_ids
+        
+        return torch.tensor(text_ids), torch.tensor(text_mask), torch.tensor(label_ids), torch.tensor(self.imgs[idx])
+
+    
+    @classmethod
+    def collate_fn(cls, x):
+        text_ids = pad_sequence([sample[0] for sample in x], batch_first=True)
+        text_mask = pad_sequence([sample[1] for sample in x], batch_first=True)
+        
+        label_ids = pad_sequence([sample[2] for sample in x], batch_first=True)
+        # label_mask = pad_sequence([sample[3] for sample in x], batch_first=True)
+        
+        imgs = torch.stack([sample[3] for sample in x], dim=0)
+        
+        return text_ids, text_mask, label_ids, imgs
     

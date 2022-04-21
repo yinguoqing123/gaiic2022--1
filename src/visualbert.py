@@ -566,13 +566,15 @@ class DistilBertModel(DistilBertPreTrainedModel):
     DISTILBERT_START_DOCSTRING,
 )
 class DistilBertForMaskedLM(DistilBertPreTrainedModel):
-    def __init__(self, config):
+    def __init__(self, config, bert):
         super().__init__(config)
 
-        self.distilbert = DistilBertModel(config)
+        # self.distilbert = DistilBertModel(config)
+        self.distilbert = bert
         self.vocab_transform = nn.Linear(config.dim, config.dim)
         self.vocab_layer_norm = nn.LayerNorm(config.dim, eps=1e-12)
         self.vocab_projector = nn.Linear(config.dim, config.vocab_size)
+        self.imgprocess = nn.Sequential(nn.Linear(2048, 1024), nn.LeakyReLU(), nn.Linear(1024, 768), nn.Dropout(p=0.1))
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -622,6 +624,7 @@ class DistilBertForMaskedLM(DistilBertPreTrainedModel):
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        visual_embeds=None
     ):
         r"""
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -630,7 +633,11 @@ class DistilBertForMaskedLM(DistilBertPreTrainedModel):
             loss is only computed for the tokens with labels in `[0, ..., config.vocab_size]`.
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
+        
+        assert visual_embeds is None, "img embedding miss"
+        
+        visual_embeds = self.imgprocess(visual_embeds)
+        
         dlbrt_output = self.distilbert(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -639,6 +646,7 @@ class DistilBertForMaskedLM(DistilBertPreTrainedModel):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
+            visual_embeds=visual_embeds
         )
         hidden_states = dlbrt_output[0]  # (bs, seq_length, dim)
         prediction_logits = self.vocab_transform(hidden_states)  # (bs, seq_length, dim)

@@ -1,6 +1,7 @@
 
 import torch
 import numpy as np
+from sklearn.metrics import roc_auc_score
 
 tasks = ['领型', '袖长', '衣长', '版型', '裙长', '穿着方式', '类别', '裤型', '裤长', '裤门襟', 
         '闭合方式', '鞋帮高度']
@@ -41,19 +42,24 @@ valsMap = [{'高领': 0, '半高领': 0, '立领': 0, '连帽': 1, '可脱卸帽
 
 def evaluate(dataset, model):
     model.eval()
+    scores_, labels_ = [], []
     acc_match_pos, acc_match_dual_neg, acc_match_neg,  tp_attr2, pos_num2  = 0, 0, 0, [], []
     for input in dataset:
         input = [f.cuda() for f in input]
         acc_match_pos_batch, acc_match_dual_neg_batch, acc_match_neg_batch, \
             tp_attr2_batch, pos_num2_batch = model.getMetric(input) 
-        acc_match_pos += acc_match_pos_batch
-        acc_match_dual_neg += acc_match_dual_neg_batch
-        acc_match_neg += acc_match_neg_batch
+        acc_match_pos += sum(acc_match_pos_batch>0.5)
+        acc_match_dual_neg += sum(acc_match_dual_neg_batch<0.5)
+        acc_match_neg += sum(acc_match_neg_batch<0.5)
+        
+        scores_.extend(list(acc_match_pos_batch)+list(acc_match_dual_neg_batch))
+        labels_.extend([1]*len(acc_match_pos_batch) + [0] * len(acc_match_dual_neg_batch))
         
         tp_attr2.append(tp_attr2_batch)
         pos_num2.append(pos_num2_batch) 
             
-   
+    auc_score = roc_auc_score(labels_, scores_)
+    
     acc_match_pos_precision = acc_match_pos/5000
     acc_match_dual_neg_precision = acc_match_dual_neg / 5000
     acc_match_neg_precision = acc_match_neg/1412
@@ -62,13 +68,15 @@ def evaluate(dataset, model):
     pos_num2_cate = np.sum(pos_num2, axis=0)
     
     # precision = all_attr_precision*0.5 + acc_match_precision * 0.5
-    precision = (acc_match_pos_precision + acc_match_neg_precision) /2 * 0.5 + sum(tp_attr2_cate)/sum(pos_num2_cate) * 0.5
+    # precision = (acc_match_pos_precision + acc_match_neg_precision) /2 * 0.5 + sum(tp_attr2_cate)/sum(pos_num2_cate) * 0.5
+    precision = auc_score * 0.5 + sum(tp_attr2_cate)/sum(pos_num2_cate) * 0.5
     print(f"图文匹配pos acc: {acc_match_pos_precision}")
     print(f"图文匹配pos对应的neg acc: {acc_match_dual_neg_precision}")
     print(f"图文匹配neg acc: {acc_match_neg_precision}")
+    print(f"图文匹配auc: {auc_score}")
    
-    print(f"mmoe acc: {tp_attr2_cate/pos_num2_cate}")
-    print(f"mmoe 总的acc: {sum(tp_attr2_cate)/sum(pos_num2_cate)}")
+    print(f"attr acc: {tp_attr2_cate/pos_num2_cate}")
+    print(f"attr 总的acc: {sum(tp_attr2_cate)/sum(pos_num2_cate)}")
     print(f"加权acc: {precision}")
     print(f"各标签数: {pos_num2_cate}")
     print("============================================")
@@ -138,3 +146,25 @@ class FocalLoss(torch.nn.Module):
         
         return loss
         
+class FGM():
+    def __init__(self, model):
+        self.model = model
+        self.backup = {}
+
+    def attack(self, epsilon=0.5, emb_name='bert.embeddings.word_embeddings.weight'):
+        # emb_name这个参数要换成你模型中embedding的参数名
+        for name, param in self.model.named_parameters():
+            if param.requires_grad and emb_name in name:
+                self.backup[name] = param.data.clone()
+                norm = torch.norm(param.grad)
+                if norm != 0 and not torch.isnan(norm):
+                    r_at = epsilon * param.grad / norm
+                    param.data.add_(r_at)
+
+    def restore(self, emb_name='bert.embeddings.word_embeddings.weight'):
+        # emb_name这个参数要换成你模型中embedding的参数名
+        for name, param in self.model.named_parameters():
+            if param.requires_grad and emb_name in name: 
+                assert name in self.backup
+                param.data = self.backup[name]
+        self.backup = {} 

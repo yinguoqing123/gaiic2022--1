@@ -1,13 +1,14 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from transformers import AutoModel, AutoConfig, AutoTokenizer
+from transformers import AutoModel, AutoConfig, AutoTokenizer, BertModel, BertTokenizer
 from torch.utils.data import DataLoader, SequentialSampler
 import numpy as np
 from dataset import MyDataSet, TestDataSet
 from model import MyModel
 from utils import evaluate
 from visualbert import DistilBertModel
+from lebert import LeBertModel
 import json
 
 tasks = ['领型', '袖长', '衣长', '版型', '裙长', '穿着方式', '类别', '裤型', '裤长', '裤门襟', 
@@ -43,11 +44,17 @@ label_nums = [14, 4, 3, 2, 3, 2, 4, 7, 4, 3, 6, 2]
 
 bert_name = 'M-CLIP/M-BERT-Distil-40'
 bert_name = 'sentence-transformers/clip-ViT-B-32-multilingual-v1'
+bert_name = 'M-CLIP/M-BERT-Base-ViT-B'
 
-state_dict = torch.load("../pretrained_model/clip-ViT-B-32-multilingual-v1.bin")
+state_dict = torch.load("../pretrained_model/M-BERT-Base-ViT-B.bin")
 tokenizer = AutoTokenizer.from_pretrained(bert_name)
-bert = DistilBertModel.from_pretrained(bert_name, state_dict=state_dict)
+# bert = DistilBertModel.from_pretrained(bert_name, state_dict=state_dict)
 
+bert = LeBertModel.from_pretrained(bert_name, state_dict=state_dict)
+
+# bert_name = 'hfl/chinese-roberta-wwm-ext'
+# tokenizer = BertTokenizer.from_pretrained(bert_name)
+# bert = LeBertModel.from_pretrained('hfl/chinese-roberta-wwm-ext')
 
 model = MyModel(bert=bert, num_tasks=12, dims=2048)
 model.load_state_dict(torch.load("../model/model_best.pt"))
@@ -100,23 +107,28 @@ with open("../data/submit.json", "w", encoding='utf-8') as f:
 f1 = open("../data/submit_0.9456.json", "r", encoding='utf-8')
 lines1 = f1.readlines()
 
-f2 = open("../data/submit.json", "r", encoding='utf-8')
+f2 = open("../data/submit_0.944.json", "r", encoding='utf-8')
 lines2 = f2.readlines()
 
-f3 = open("../data/submit_melt.json", "w", encoding='utf-8')
+f3 = open("../data/submit_0.943.json", "r", encoding='utf-8')
+lines3 = f3.readlines()
+
+
+f4 = open("../data/submit_melt.json", "w", encoding='utf-8')
 
 for i in range(len(lines1)):
     a1 = json.loads(lines1[i])
     a2 = json.loads(lines2[i])
+    a3 = json.loads(lines3[i])
     d = {'img_name': a1['img_name']}
     attr = a2['match']
-    attr['图文'] = 1 if float(a1['match']['图文']) > 0.5 else 0
+    attr['图文'] = 1 if (float(a1['match']['图文']) + a2['match']['图文'] + a3['match']['图文']) / 3 > 0.5 else 0
     d['match'] = attr
     for key in attr:
         if key != '图文':
-            attr[key] = 1 if (0.6 * float(a1['match'][key]) + 0.4 * a2['match'][key] )   > 0.5 else 0
+            attr[key] = 1 if (1/3 * float(a1['match'][key]) + 1/3 * a2['match'][key] + 1/3 * a3['match'][key] )   > 0.5 else 0
     d = json.dumps(d, ensure_ascii=False)
-    f3.write(d+'\n')
+    f4.write(d+'\n')
 
 with open("../data/submit.json", "w", encoding='utf-8') as f:
     for i in range(len(img_name)):

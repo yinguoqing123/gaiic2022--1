@@ -1,4 +1,3 @@
-from distutils.command.build_scripts import first_line_re
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -8,26 +7,53 @@ import numpy as np
 from dataset import MyDataSet
 from model import MyModel
 from utils import evaluate, EMA
-from visualbert import DistilBertModel
-from lebert import LeBertModel
+from visualbert import DistilBertModel, DistilBertForMaskedLM
+from lebert import BertModel, BertForMaskedLM
 
-bert_name = 'M-CLIP/M-BERT-Distil-40'
+# 取出权重
 bert_name = 'sentence-transformers/clip-ViT-B-32-multilingual-v1'
-
+config = AutoConfig.from_pretrained(bert_name)
 state_dict = torch.load("../pretrained_model/clip-ViT-B-32-multilingual-v1.bin")
 tokenizer = AutoTokenizer.from_pretrained(bert_name)
-
-# bert = AutoModel.from_pretrained(bert_name, state_dict=state_dict)
-
 bert = DistilBertModel.from_pretrained(bert_name, state_dict=state_dict)
-# tokenizer = BertTokenizer.from_pretrained('hfl/rbt3')
-# bert = LeBertModel.from_pretrained('hfl/rbt3')
+
+
+model_pretrain = DistilBertForMaskedLM(config, bert)
+model_pretrain.load_state_dict(torch.load("../model/model_best_pretrained.pt"))
+
+# bert_name = 'M-CLIP/M-BERT-Distil-40'
+# bert_name = 'sentence-transformers/clip-ViT-B-32-multilingual-v1'
+
+# state_dict = torch.load("../pretrained_model/clip-ViT-B-32-multilingual-v1.bin")
+# tokenizer = AutoTokenizer.from_pretrained(bert_name)
+# # bert = DistilBertModel.from_pretrained(bert_name, state_dict=state_dict)
+# bert = model_pretrain.distilbert
+
+
+
+# bert_name = 'hfl/rbt3'
+# config = AutoConfig.from_pretrained(bert_name)
+# state_dict = torch.load("../pretrained_model/rbt3_mlm.bin")
+# tokenizer = AutoTokenizer.from_pretrained(bert_name)
+# model_pretrain = BertForMaskedLM.from_pretrained(bert_name, state_dict=state_dict)
+# model_pretrain.load_state_dict(torch.load("../model/model_best_pretrained.pt"))
+
+
+# tokenizer = AutoTokenizer.from_pretrained(bert_name)
+# # bert = DistilBertModel.from_pretrained(bert_name, state_dict=state_dict)
+# bert = model_pretrain.bert
+
+# # tokenizer = BertTokenizer.from_pretrained('hfl/rbt3')
+# # bert = LeBertModel.from_pretrained('hfl/chinese-roberta-wwm-ext')
+# # bert = LeBertModel.from_pretrained(bert_name, state_dict=state_dict)
 
 
 model = MyModel(bert)
+model.imgprocess = model_pretrain.imgprocess
 model = model.cuda()
+
 # ema = EMA(model)
-# # model.load_state_dict(torch.load("../model/model_best.pt"))
+# model.load_state_dict(torch.load("../model/model_best.pt"))
 # ema.register()
 
 
@@ -37,15 +63,15 @@ path_test = '../data/train/train_fine.txt.01'
 path_coarse_noattr = '../data/train/train_coarse_noattr.txt.00'
 trainset = MyDataSet(path_train, tokenizer=tokenizer)
 traincoarseset = MyDataSet(path_coarse_train, tokenizer=tokenizer, mode='coarse')
-traincoarsenoattr = MyDataSet(path_coarse_noattr, tokenizer=tokenizer, mode='coarse')
-trainsetunion = ConcatDataset([trainset, traincoarseset, traincoarsenoattr])
+traincoarsesetnoattr = MyDataSet(path_coarse_noattr, tokenizer=tokenizer, mode='coarse')
 
 testset = MyDataSet(path_test, tokenizer=tokenizer)
 path_coarse_noattr_test = '../data/train/train_coarse_noattr.txt.01'
-testcoarsetnoattr = MyDataSet(path_coarse_noattr_test, tokenizer=tokenizer, mode='coarse')
-testunion = ConcatDataset([testset, testcoarsetnoattr])
+testcoarsesetnoattr = MyDataSet(path_coarse_noattr_test, tokenizer=tokenizer, mode='coarse')
+testunion = ConcatDataset([testset, testcoarsesetnoattr])
 testsample = SequentialSampler(testunion)
 
+trainsetunion = ConcatDataset([trainset, traincoarseset, traincoarsesetnoattr, testcoarsesetnoattr])
 trainload = DataLoader(trainsetunion, batch_size=128, shuffle=True, collate_fn=trainset.collate_fn, num_workers=8)
 testload = DataLoader(testunion, batch_size=128, sampler=testsample, collate_fn=testset.collate_fn, num_workers=8)
 
@@ -59,15 +85,15 @@ for name, param in model.named_parameters():
         else:
             other_decay_parameters.append(param)
 
-p = [{'params': bert_parameters, 'lr': 5e-5}, {'params': other_no_decay_parameters, 'lr': 4e-4, 'weight_decay': 0.0001}, 
-     {'params': other_decay_parameters, 'lr': 4e-4}]   
+p = [{'params': bert_parameters, 'lr': 5e-5}, {'params': other_no_decay_parameters, 'lr': 2e-4, 'weight_decay': 0.0001}, 
+     {'params': other_decay_parameters, 'lr': 2e-4}]   
 optimizer = torch.optim.Adam(p)
 #lrscheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, 0.9)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', factor=0.7, patience=2)
 
 best_p = evaluate(testload, model)
 ema_first = True
-for epoch in range(20):
+for epoch in range(10):
     step = 0
     running_loss = 0
     for input in trainload:
@@ -81,11 +107,11 @@ for epoch in range(20):
         # if epoch >= 4:
         #     ema.update()
         running_loss += loss.item()
-        if step % 100 == 99:
+        if step % 100 == 0:
             print(f"Epoch {epoch+1}, step {step+1} : {running_loss}")
             running_loss = 0
         
-        if step % 300 == 299:
+        if step % 300 == 0:
             
             # if epoch >= 4 and ema_first:
             #     ema.register()
