@@ -99,6 +99,7 @@ with open("../data/submit.json", "w", encoding='utf-8') as f:
         attr['图文'] = float(match_label[i])
         for query, val in attr_match[i]:
             attr[query] = float(val)
+            # attr[query] = 1 if val>0.5 else 0
         d['match'] = attr
         d = json.dumps(d, ensure_ascii=False)
         f.write(d+'\n')
@@ -140,4 +141,5 @@ with open("../data/submit.json", "w", encoding='utf-8') as f:
         d['match'] = attr
         d = json.dumps(d, ensure_ascii=False)
         f.write(d+'\n')
+        
         

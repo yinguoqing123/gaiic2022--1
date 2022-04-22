@@ -10,7 +10,7 @@ from utils import evaluate, EMA
 from visualbert import DistilBertModel, DistilBertForMaskedLM
 from lebert import BertModel, BertForMaskedLM
 
-# 取出权重
+
 bert_name = 'sentence-transformers/clip-ViT-B-32-multilingual-v1'
 config = AutoConfig.from_pretrained(bert_name)
 state_dict = torch.load("../pretrained_model/clip-ViT-B-32-multilingual-v1.bin")
@@ -18,42 +18,11 @@ tokenizer = AutoTokenizer.from_pretrained(bert_name)
 bert = DistilBertModel.from_pretrained(bert_name, state_dict=state_dict)
 
 
-model_pretrain = DistilBertForMaskedLM(config, bert)
-model_pretrain.load_state_dict(torch.load("../model/model_best_pretrained.pt"))
-
-# bert_name = 'M-CLIP/M-BERT-Distil-40'
-# bert_name = 'sentence-transformers/clip-ViT-B-32-multilingual-v1'
-
-# state_dict = torch.load("../pretrained_model/clip-ViT-B-32-multilingual-v1.bin")
-# tokenizer = AutoTokenizer.from_pretrained(bert_name)
-# # bert = DistilBertModel.from_pretrained(bert_name, state_dict=state_dict)
-# bert = model_pretrain.distilbert
-
-
-
-# bert_name = 'hfl/rbt3'
-# config = AutoConfig.from_pretrained(bert_name)
-# state_dict = torch.load("../pretrained_model/rbt3_mlm.bin")
-# tokenizer = AutoTokenizer.from_pretrained(bert_name)
-# model_pretrain = BertForMaskedLM.from_pretrained(bert_name, state_dict=state_dict)
-# model_pretrain.load_state_dict(torch.load("../model/model_best_pretrained.pt"))
-
-
-# tokenizer = AutoTokenizer.from_pretrained(bert_name)
-# # bert = DistilBertModel.from_pretrained(bert_name, state_dict=state_dict)
-# bert = model_pretrain.bert
-
-# # tokenizer = BertTokenizer.from_pretrained('hfl/rbt3')
-# # bert = LeBertModel.from_pretrained('hfl/chinese-roberta-wwm-ext')
-# # bert = LeBertModel.from_pretrained(bert_name, state_dict=state_dict)
-
-
 model = MyModel(bert)
-model.imgprocess = model_pretrain.imgprocess
 model = model.cuda()
 
 # ema = EMA(model)
-# model.load_state_dict(torch.load("../model/model_best.pt"))
+model.load_state_dict(torch.load("../model/model_best.pt.0.9480"))
 # ema.register()
 
 
@@ -61,8 +30,10 @@ path_train = '../data/train/train_fine.txt.00'
 path_coarse_train = '../data/train/train_coarse_trans.txt'
 path_test = '../data/train/train_fine.txt.01'
 path_coarse_noattr = '../data/train/train_coarse_noattr.txt.00'
+path_testA = '../data/train/preliminary_testA.txt.pesu_label'
 trainset = MyDataSet(path_train, tokenizer=tokenizer)
 traincoarseset = MyDataSet(path_coarse_train, tokenizer=tokenizer, mode='coarse')
+trainset_testA = MyDataSet(path_testA, tokenizer=tokenizer)
 traincoarsesetnoattr = MyDataSet(path_coarse_noattr, tokenizer=tokenizer, mode='coarse')
 
 testset = MyDataSet(path_test, tokenizer=tokenizer)
@@ -71,7 +42,7 @@ testcoarsesetnoattr = MyDataSet(path_coarse_noattr_test, tokenizer=tokenizer, mo
 testunion = ConcatDataset([testset, testcoarsesetnoattr])
 testsample = SequentialSampler(testunion)
 
-trainsetunion = ConcatDataset([trainset, traincoarseset, traincoarsesetnoattr, testcoarsesetnoattr])
+trainsetunion = ConcatDataset([trainset, traincoarseset, traincoarsesetnoattr, testcoarsesetnoattr, trainset_testA])
 trainload = DataLoader(trainsetunion, batch_size=128, shuffle=True, collate_fn=trainset.collate_fn, num_workers=8)
 testload = DataLoader(testunion, batch_size=128, sampler=testsample, collate_fn=testset.collate_fn, num_workers=8)
 
@@ -138,6 +109,3 @@ for epoch in range(10):
         best_p = p
         torch.save(model.state_dict(), f'../model/model_best.pt')
     
-
-
-                
