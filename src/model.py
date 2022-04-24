@@ -3,7 +3,7 @@ from torch import nn
 from torch.nn import functional as F
 from transformers import AutoModel, AutoConfig, AutoTokenizer
 from torch.utils.data import DataLoader
-from utils import FocalLoss
+from utils import FocalLoss, get_coef
 
 class MyModel(nn.Module):
     def __init__(self, bert, experts=10, num_tasks=12, dims=2048) -> None:
@@ -14,6 +14,8 @@ class MyModel(nn.Module):
         # self.match1 = nn.Linear(512, 1)
         # self.match2 = nn.Sequential(nn.Linear(512, 128), nn.LeakyReLU(), nn.Linear(128, 12))
         self.loss = nn.BCEWithLogitsLoss()
+        self.coef = torch.tensor(get_coef(13), device='cuda', dtype=torch.float) # 4096*13
+        self.loss_cross = nn.CrossEntropyLoss()
 
     def forward(self, input):
         img, text_ids, text_mask, label_attr, mask, neg_text_ids, neg_text_mask, neg_tasks_mask, \
@@ -26,7 +28,7 @@ class MyModel(nn.Module):
         text_neg = self.bert(neg_text_ids, neg_text_mask, visual_embeds=img)[0][:, 0, :]                
         pos_attr_text_mask = torch.cat([pos_attr_text_mask, torch.ones(pos_attr_text_mask.shape[0], 1, device='cuda', dtype=torch.int64)], dim=-1)
         text_attr_pos = self.bert(pos_attr_text_ids, pos_attr_text_mask, visual_embeds=img)[0][:, 0, :]
-          
+            
         # pos_sample = torch.cat([text_pos, img], dim=-1)
         # neg_sample = torch.cat([text_neg, img], dim=-1)
         # pos_attr_sample = torch.cat([text_attr_pos, img], dim=-1)
@@ -39,12 +41,29 @@ class MyModel(nn.Module):
         neg_sample = self.match(neg_sample)   # bsz, 13
         pos_attr_sample = self.match(pos_attr_sample)[:, 1:]
 
-        pos_sample[:, 0][pos_title_mask==0] = 1e12
-        neg_sample[:, 0][neg_title_mask==0] = -1e12
+        neg_sample[:, 0] = neg_sample[:, 0] * -1.0
+        neg_sample[:, 1:] = torch.where((mask==1)&(neg_tasks_mask==0), neg_sample[:, 1:]*-1.0, neg_sample[:, 1:])
 
-        label_imgtext = torch.cat([torch.ones(pos_sample.shape[0],  1, device='cuda'), torch.zeros(pos_sample.shape[0], 1, device='cuda')], dim=-1)  # bsz, 3     
-        pred_imgtext = torch.stack([pos_sample[:, 0], neg_sample[:, 0]], dim=-1)  # bsz, 2
-        loss_imgtext = self.loss(pred_imgtext, label_imgtext)
+        pos_sample[:, 0][pos_title_mask==0] = 0
+        pos_sample[:, 1:][mask==0] = 0
+
+        neg_sample[:, 0][neg_title_mask==0] = 0
+        neg_sample[:, 1:][mask==0] = 0
+
+        pos_sample = torch.matmul(self.coef.unsqueeze(dim=0), pos_sample.unsqueeze(dim=-1)).squeeze() # bsz, 4096
+        neg_sample = torch.matmul(self.coef.unsqueeze(dim=0), neg_sample.unsqueeze(dim=-1)).squeeze() # bsz, 4096
+                
+        pred_img_text = torch.cat([pos_sample, neg_sample], dim=0)
+        label_img_text = torch.zeros_like(pred_img_text[:, 0], dtype=torch.long)
+        loss_imgtext = self.loss_cross(pred_img_text, label_img_text)
+
+        # pos_sample[:, 0][pos_title_mask==0] = 1e12
+        # neg_sample[:, 0][neg_title_mask==0] = -1e12
+        
+
+        # label_imgtext = torch.cat([torch.ones(pos_sample.shape[0],  1, device='cuda'), torch.zeros(pos_sample.shape[0], 1, device='cuda')], dim=-1)  # bsz, 3     
+        # pred_imgtext = torch.stack([pos_sample[:, 0], neg_sample[:, 0]], dim=-1)  # bsz, 2
+        # loss_imgtext = self.loss(pred_imgtext, label_imgtext)
 
         pos_attr_sample[mask==0] = -1e12
         loss_attr = self.loss(pos_attr_sample, pos_tasks_mask.float())

@@ -22,7 +22,7 @@ model = MyModel(bert)
 model = model.cuda()
 
 # ema = EMA(model)
-model.load_state_dict(torch.load("../model/model_best.pt.0.9480"))
+# model.load_state_dict(torch.load("../model/model_best.pt.0.9480"))
 # ema.register()
 
 
@@ -33,7 +33,7 @@ path_coarse_noattr = '../data/train/train_coarse_noattr.txt.00'
 path_testA = '../data/train/preliminary_testA.txt.pesu_label'
 trainset = MyDataSet(path_train, tokenizer=tokenizer)
 traincoarseset = MyDataSet(path_coarse_train, tokenizer=tokenizer, mode='coarse')
-trainset_testA = MyDataSet(path_testA, tokenizer=tokenizer)
+# trainset_testA = MyDataSet(path_testA, tokenizer=tokenizer)
 traincoarsesetnoattr = MyDataSet(path_coarse_noattr, tokenizer=tokenizer, mode='coarse')
 
 testset = MyDataSet(path_test, tokenizer=tokenizer)
@@ -42,7 +42,7 @@ testcoarsesetnoattr = MyDataSet(path_coarse_noattr_test, tokenizer=tokenizer, mo
 testunion = ConcatDataset([testset, testcoarsesetnoattr])
 testsample = SequentialSampler(testunion)
 
-trainsetunion = ConcatDataset([trainset, traincoarseset, traincoarsesetnoattr, testcoarsesetnoattr, trainset_testA])
+trainsetunion = ConcatDataset([trainset, traincoarseset, traincoarsesetnoattr, testcoarsesetnoattr])
 trainload = DataLoader(trainsetunion, batch_size=128, shuffle=True, collate_fn=trainset.collate_fn, num_workers=8)
 testload = DataLoader(testunion, batch_size=128, sampler=testsample, collate_fn=testset.collate_fn, num_workers=8)
 

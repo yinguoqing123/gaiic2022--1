@@ -138,7 +138,9 @@ class MyDataSet(Dataset):
                 if key != select_task:
                     if np.random.rand() < 0.3:   # 再取0.2的概率随机替换
                         val = np.random.choice(list(valsMap[tasksMap[key]].keys()))
-                        neg_title = neg_title.replace(self.task_names[idx][key], val)
+                        if val != self.task_names[idx][key]:
+                            neg_title = neg_title.replace(self.task_names[idx][key], val)
+                            neg_tasks_mask[tasksMap[key]] = 0
             
             while True:
                 select_attr_val = np.random.choice(list(valsMap[tasksMap[select_task]].keys()))

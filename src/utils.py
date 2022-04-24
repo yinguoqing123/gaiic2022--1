@@ -2,6 +2,7 @@
 import torch
 import numpy as np
 from sklearn.metrics import roc_auc_score
+from collections import deque
 
 tasks = ['领型', '袖长', '衣长', '版型', '裙长', '穿着方式', '类别', '裤型', '裤长', '裤门襟', 
         '闭合方式', '鞋帮高度']
@@ -39,6 +40,18 @@ valsMap = [{'高领': 0, '半高领': 0, '立领': 0, '连帽': 1, '可脱卸帽
            {'松紧': 0, '拉链': 1, '系带': 2}, 
            {'松紧带': 0, '拉链': 1, '套筒': 2, '套脚': 2, '一脚蹬': 2, '系带': 3, '魔术贴': 4, '搭扣': 5}, 
            {'高帮': 0, '中帮': 0, '低帮': 1}]
+
+def get_coef(n):
+    dq = deque([[]])
+    dq_next = deque([])
+    for i in range(n):
+        while dq:
+            tmp = dq.popleft()
+            dq_next.append(tmp + [1])
+            dq_next.append(tmp + [0])
+        dq = dq_next
+        dq_next = deque([])
+    return dq
 
 def evaluate(dataset, model):
     model.eval()
